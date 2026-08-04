@@ -1,0 +1,14 @@
+{
+  "name": "barcelona-cafes",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Collect Barcelona cafes via Google Places API (New) into local SQLite",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
