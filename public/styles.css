@@ -118,6 +118,36 @@ code {
   line-height: 1.45;
 }
 
+.key-block {
+  margin-top: 1.25rem;
+  padding-top: 1.15rem;
+  border-top: 1px solid var(--line);
+}
+
+.coffee-stats {
+  margin-top: 0.25rem;
+}
+
+.answer-block {
+  margin-top: 0.35rem;
+  padding: 1rem 1.1rem;
+  border-radius: 12px;
+  background: rgba(18, 14, 11, 0.45);
+  border: 1px solid var(--line);
+}
+
+.answer-text {
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+.answer-text a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .stack {
   display: grid;
   gap: 0.85rem;

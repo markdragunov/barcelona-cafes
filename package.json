@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "rag:status": "python3 -m rag status",
+    "setup:python": "python3 -m pip install -r requirements.txt"
   },
   "dependencies": {
     "express": "^4.21.2"

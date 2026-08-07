@@ -52,6 +52,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_reviews_place ON reviews(place_id);
 `);
 
+const cafeColumns = db.prepare("PRAGMA table_info(cafes)").all();
+if (!cafeColumns.some((col) => col.name === "coffee_content")) {
+  db.exec("ALTER TABLE cafes ADD COLUMN coffee_content TEXT");
+}
+
 export function getSetting(key) {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
   return row?.value ?? null;
@@ -70,6 +75,22 @@ export function getApiKey() {
 
 export function setApiKey(apiKey) {
   setSetting("google_places_api_key", apiKey);
+}
+
+export function getParallelApiKey() {
+  return getSetting("parallel_api_key");
+}
+
+export function setParallelApiKey(apiKey) {
+  setSetting("parallel_api_key", apiKey);
+}
+
+export function getOpenAiApiKey() {
+  return getSetting("openai_api_key");
+}
+
+export function setOpenAiApiKey(apiKey) {
+  setSetting("openai_api_key", apiKey);
 }
 
 const upsertCafeStmt = db.prepare(`
@@ -164,7 +185,8 @@ export function getCafesForExport(neighborhoodId) {
     .prepare(
       `SELECT
         place_id, name, address, rating, user_rating_count, website,
-        place_types, latitude, longitude, neighborhood_id, neighborhood_name
+        place_types, latitude, longitude, neighborhood_id, neighborhood_name,
+        coffee_content
       FROM cafes
       ${clause}
       ORDER BY name COLLATE NOCASE`
@@ -181,6 +203,64 @@ export function getCafesForExport(neighborhoodId) {
     ...cafe,
     reviews: reviewStmt.all(cafe.place_id),
   }));
+}
+
+/**
+ * Cafes with a website and empty coffee_content for Parallel extract.
+ * neighborhoodId "all-barcelona" (or empty) = all neighborhoods.
+ */
+export function getCafesNeedingCoffeeContent(neighborhoodId) {
+  const filters = [
+    "website IS NOT NULL",
+    "TRIM(website) != ''",
+    "(coffee_content IS NULL OR TRIM(coffee_content) = '')",
+  ];
+  const params = [];
+
+  if (neighborhoodId && neighborhoodId !== "all-barcelona") {
+    filters.push("neighborhood_id = ?");
+    params.push(neighborhoodId);
+  }
+
+  return db
+    .prepare(
+      `SELECT place_id, name, website, neighborhood_id, neighborhood_name
+       FROM cafes
+       WHERE ${filters.join(" AND ")}
+       ORDER BY name COLLATE NOCASE`
+    )
+    .all(...params);
+}
+
+/** Cafes in scope that already have coffee_content (skipped). */
+export function countCafesWithCoffeeContent(neighborhoodId) {
+  const filters = [
+    "website IS NOT NULL",
+    "TRIM(website) != ''",
+    "coffee_content IS NOT NULL",
+    "TRIM(coffee_content) != ''",
+  ];
+  const params = [];
+
+  if (neighborhoodId && neighborhoodId !== "all-barcelona") {
+    filters.push("neighborhood_id = ?");
+    params.push(neighborhoodId);
+  }
+
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM cafes WHERE ${filters.join(" AND ")}`
+    )
+    .get(...params);
+  return Number(row?.n ?? 0);
+}
+
+export function updateCoffeeContent(placeId, coffeeContent) {
+  db.prepare(
+    `UPDATE cafes
+     SET coffee_content = ?, updated_at = datetime('now')
+     WHERE place_id = ?`
+  ).run(coffeeContent, placeId);
 }
 
 export function getCafeCount() {
