@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Barcelona Coffee</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Source+Sans+3:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #f5f0e8;
+        --ink: #1a1a1a;
+        --muted: #6b6560;
+        --line: #1a1a1a;
+        --card: #fffdf8;
+        --pill: #ebe4d8;
+        font-family: "Source Sans 3", sans-serif;
+        color: var(--ink);
+        background: var(--bg);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--ink);
+      }
+
+      .page {
+        width: min(720px, calc(100% - 2.5rem));
+        margin: 0 auto;
+        padding: 4.5rem 0 5rem;
+      }
+
+      .hero {
+        margin-bottom: 2.75rem;
+        animation: fade-up 0.8s ease both;
+      }
+
+      h1 {
+        margin: 0;
+        font-family: "Libre Baskerville", Georgia, serif;
+        font-weight: 400;
+        font-size: clamp(2.1rem, 5vw, 3rem);
+        line-height: 1.15;
+        letter-spacing: -0.02em;
+      }
+
+      .lede {
+        margin: 0.9rem 0 0;
+        max-width: 28rem;
+        color: var(--muted);
+        font-size: 1.05rem;
+        line-height: 1.5;
+      }
+
+      .search {
+        animation: fade-up 0.8s ease 0.08s both;
+      }
+
+      .search-row {
+        display: grid;
+        gap: 1.5rem;
+      }
+
+      label.sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        border: 0;
+      }
+
+      #query {
+        width: 100%;
+        border: 0;
+        border-bottom: 1px solid rgba(26, 26, 26, 0.28);
+        border-radius: 0;
+        background: transparent;
+        padding: 0.85rem 0;
+        font: inherit;
+        font-size: 1.2rem;
+        color: var(--ink);
+        outline: none;
+        transition: border-color 0.2s ease;
+      }
+
+      #query::placeholder {
+        color: #9a948c;
+      }
+
+      #query:focus {
+        border-bottom-color: var(--ink);
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+
+      .pills {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+      }
+
+      .pills span {
+        font-size: 0.85rem;
+        color: var(--muted);
+        margin-right: 0.35rem;
+      }
+
+      .pill {
+        appearance: none;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font: inherit;
+        font-size: 0.92rem;
+        font-weight: 500;
+        padding: 0.4rem 0.85rem;
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.2s ease, color 0.2s ease;
+      }
+
+      .pill[aria-pressed="true"] {
+        background: var(--ink);
+        color: var(--bg);
+      }
+
+      .pill:hover:not([aria-pressed="true"]) {
+        background: var(--pill);
+        color: var(--ink);
+      }
+
+      #search-btn {
+        appearance: none;
+        border: 0;
+        background: var(--ink);
+        color: var(--bg);
+        font: inherit;
+        font-size: 0.95rem;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        padding: 0.75rem 1.4rem;
+        border-radius: 999px;
+        cursor: pointer;
+        transition: opacity 0.2s ease, transform 0.15s ease;
+      }
+
+      #search-btn:hover:not(:disabled) {
+        transform: translateY(-1px);
+      }
+
+      #search-btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .status {
+        min-height: 1.35rem;
+        margin: 1.1rem 0 0;
+        font-size: 0.92rem;
+        color: var(--muted);
+        animation: fade-up 0.8s ease 0.12s both;
+      }
+
+      .status.error {
+        color: #8a3b2d;
+      }
+
+      .intro {
+        margin: 2.25rem 0 1.25rem;
+        font-family: "Libre Baskerville", Georgia, serif;
+        font-size: 1.15rem;
+        line-height: 1.45;
+        animation: fade-up 0.55s ease both;
+      }
+
+      .results {
+        display: grid;
+        gap: 1rem;
+        margin-top: 1.5rem;
+      }
+
+      .card {
+        background: var(--card);
+        border: 1px solid rgba(26, 26, 26, 0.08);
+        border-radius: 2px;
+        padding: 1.35rem 1.4rem 1.25rem;
+        opacity: 0;
+        transform: translateY(10px);
+        animation: fade-up 0.55s ease forwards;
+      }
+
+      .card:nth-child(1) { animation-delay: 0.05s; }
+      .card:nth-child(2) { animation-delay: 0.1s; }
+      .card:nth-child(3) { animation-delay: 0.15s; }
+      .card:nth-child(4) { animation-delay: 0.2s; }
+      .card:nth-child(5) { animation-delay: 0.25s; }
+      .card:nth-child(6) { animation-delay: 0.3s; }
+      .card:nth-child(7) { animation-delay: 0.35s; }
+      .card:nth-child(8) { animation-delay: 0.4s; }
+      .card:nth-child(9) { animation-delay: 0.45s; }
+      .card:nth-child(10) { animation-delay: 0.5s; }
+
+      .card-title {
+        margin: 0;
+        font-family: "Libre Baskerville", Georgia, serif;
+        font-size: 1.25rem;
+        font-weight: 400;
+        line-height: 1.3;
+      }
+
+      .card-title .rating {
+        white-space: nowrap;
+      }
+
+      .why {
+        margin: 0.65rem 0 0;
+        color: var(--ink);
+        line-height: 1.5;
+        font-size: 1rem;
+      }
+
+      .address {
+        margin: 0.85rem 0 0;
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.4;
+      }
+
+      .links {
+        margin: 0.7rem 0 0;
+        display: flex;
+        gap: 0.65rem;
+        align-items: center;
+        font-size: 0.95rem;
+        font-weight: 600;
+      }
+
+      .links a {
+        color: var(--ink);
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+
+      .links .sep {
+        color: var(--muted);
+        font-weight: 400;
+      }
+
+      @keyframes fade-up {
+        from {
+          opacity: 0;
+          transform: translateY(12px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @media (max-width: 560px) {
+        .page {
+          padding-top: 3rem;
+        }
+
+        .controls {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        #search-btn {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <h1>Find your coffee in Barcelona</h1>
+        <p class="lede">
+          Ask in plain language. We’ll find cafes from a curated local guide.
+        </p>
+      </header>
+
+      <form class="search" id="search-form">
+        <div class="search-row">
+          <label class="sr-only" for="query">Search</label>
+          <input
+            id="query"
+            name="query"
+            type="search"
+            placeholder="Filter coffee near Sagrada Familia"
+            autocomplete="off"
+            required
+          />
+          <div class="controls">
+            <div class="pills" role="group" aria-label="Number of results">
+              <span>Results</span>
+              <button type="button" class="pill" data-topn="3" aria-pressed="false">3</button>
+              <button type="button" class="pill" data-topn="5" aria-pressed="true">5</button>
+              <button type="button" class="pill" data-topn="10" aria-pressed="false">10</button>
+            </div>
+            <button type="submit" id="search-btn">Search</button>
+          </div>
+        </div>
+      </form>
+
+      <p id="status" class="status" aria-live="polite"></p>
+      <p id="intro" class="intro" hidden></p>
+      <section id="results" class="results" aria-live="polite"></section>
+    </main>
+
+    <script>
+      const form = document.getElementById("search-form");
+      const queryInput = document.getElementById("query");
+      const searchBtn = document.getElementById("search-btn");
+      const statusEl = document.getElementById("status");
+      const introEl = document.getElementById("intro");
+      const resultsEl = document.getElementById("results");
+      const pills = [...document.querySelectorAll(".pill[data-topn]")];
+
+      let topN = 5;
+
+      pills.forEach((pill) => {
+        pill.addEventListener("click", () => {
+          topN = Number(pill.dataset.topn);
+          pills.forEach((p) =>
+            p.setAttribute("aria-pressed", String(p === pill))
+          );
+        });
+      });
+
+      function setStatus(message, isError = false) {
+        statusEl.textContent = message || "";
+        statusEl.classList.toggle("error", Boolean(isError && message));
+      }
+
+      function escapeHtml(str) {
+        return String(str)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function parseLinkLine(line) {
+        const map = line.match(/\[map\]\((https?:\/\/[^)\s]+)\)/i);
+        const site = line.match(/\[site\]\((https?:\/\/[^)\s]+)\)/i);
+        return {
+          mapUrl: map?.[1] || null,
+          siteUrl: site?.[1] || null,
+        };
+      }
+
+      /** Parse the same RAG answer format used by the admin UI. */
+      function parseAnswer(answer, apiResults = []) {
+        const byName = new Map(
+          (apiResults || []).map((r) => [
+            String(r.name || "").trim().toLowerCase(),
+            r,
+          ])
+        );
+
+        const blocks = String(answer || "")
+          .trim()
+          .split(/\n\s*\n/)
+          .map((b) => b.trim())
+          .filter(Boolean);
+
+        let intro = "";
+        const cafes = [];
+
+        for (const block of blocks) {
+          const lines = block
+            .split("\n")
+            .map((l) => l.trim())
+            .filter(Boolean);
+          if (!lines.length) continue;
+
+          const titleMatch = lines[0].match(/^(.*?)\s*★\s*([\d.]+)\s*$/);
+
+          if (!titleMatch && cafes.length === 0 && !intro) {
+            intro = lines.join(" ");
+            continue;
+          }
+
+          if (!titleMatch) {
+            if (!intro) intro = lines.join(" ");
+            continue;
+          }
+
+          const name = titleMatch[1].trim();
+          const rating = titleMatch[2];
+          let why = "";
+          let address = "";
+          let mapUrl = null;
+          let siteUrl = null;
+
+          const linkLine = lines.find((l) => /\[map\]|\[site\]/i.test(l));
+          if (linkLine) {
+            ({ mapUrl, siteUrl } = parseLinkLine(linkLine));
+          }
+
+          const contentLines = lines
+            .slice(1)
+            .filter((l) => !/\[map\]|\[site\]/i.test(l));
+          if (contentLines.length >= 1) why = contentLines[0];
+          if (contentLines.length >= 2) {
+            address = contentLines.slice(1).join(" ");
+          }
+
+          const meta = byName.get(name.toLowerCase());
+          if (!mapUrl && meta?.place_id) {
+            mapUrl = `https://www.google.com/maps/place/?q=place_id:${meta.place_id}`;
+          }
+          if (!siteUrl && meta?.website) {
+            siteUrl = meta.website;
+          }
+          if (!address && meta?.address) {
+            address = meta.address;
+          }
+
+          cafes.push({ name, rating, why, address, mapUrl, siteUrl });
+        }
+
+        return { intro, cafes };
+      }
+
+      function renderResults(parsed) {
+        if (parsed.intro) {
+          introEl.hidden = false;
+          introEl.textContent = parsed.intro;
+        } else {
+          introEl.hidden = true;
+          introEl.textContent = "";
+        }
+
+        resultsEl.innerHTML = parsed.cafes
+          .map((cafe) => {
+            const links = [];
+            if (cafe.mapUrl) {
+              links.push(
+                `<a href="${escapeHtml(cafe.mapUrl)}" target="_blank" rel="noopener">map</a>`
+              );
+            }
+            if (cafe.siteUrl) {
+              links.push(
+                `<a href="${escapeHtml(cafe.siteUrl)}" target="_blank" rel="noopener">site</a>`
+              );
+            }
+            const linksHtml = links.length
+              ? `<div class="links">${links.join('<span class="sep">·</span>')}</div>`
+              : "";
+
+            return `
+              <article class="card">
+                <h2 class="card-title">
+                  ${escapeHtml(cafe.name)}
+                  ${
+                    cafe.rating
+                      ? `<span class="rating"> ★ ${escapeHtml(cafe.rating)}</span>`
+                      : ""
+                  }
+                </h2>
+                ${
+                  cafe.why
+                    ? `<p class="why">${escapeHtml(cafe.why)}</p>`
+                    : ""
+                }
+                ${
+                  cafe.address
+                    ? `<p class="address">${escapeHtml(cafe.address)}</p>`
+                    : ""
+                }
+                ${linksHtml}
+              </article>
+            `;
+          })
+          .join("");
+      }
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const query = queryInput.value.trim();
+        if (!query) return;
+
+        searchBtn.disabled = true;
+        introEl.hidden = true;
+        introEl.textContent = "";
+        resultsEl.innerHTML = "";
+        setStatus("Searching…");
+
+        try {
+          const res = await fetch("/api/rag/search", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query, topN }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            throw new Error(data.error || `Request failed (${res.status})`);
+          }
+
+          const parsed = parseAnswer(data.answer || "", data.results || []);
+          if (!parsed.cafes.length) {
+            introEl.hidden = false;
+            introEl.textContent =
+              data.answer || "No matching cafes found in the local guide.";
+            setStatus("");
+            return;
+          }
+
+          renderResults(parsed);
+          const loc = data.location;
+          const locBit =
+            loc?.applied && loc.location
+              ? `Near ${loc.location}`
+              : "Barcelona";
+          setStatus(`${parsed.cafes.length} cafes · ${locBit}`);
+        } catch (err) {
+          setStatus(err.message || "Search failed", true);
+        } finally {
+          searchBtn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

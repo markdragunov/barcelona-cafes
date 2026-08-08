@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Barcelona Cafes — Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="header">
+        <p class="brand">Barcelona Cafes</p>
+        <h1>Places collector</h1>
+        <p class="lede">
+          Pull cafes from Google Places API (New) into a local SQLite database.
+          Only places with <code>cafe</code> in <code>types</code> are saved.
+        </p>
+      </header>
+
+      <main class="grid">
+        <section class="panel">
+          <h2>API keys</h2>
+          <p class="hint">Stored locally in SQLite. Sent only to the matching provider.</p>
+          <form id="api-key-form" class="stack">
+            <label>
+              Google Places API (New) key
+              <input
+                id="api-key-input"
+                type="password"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="AIza…"
+              />
+            </label>
+            <div class="row">
+              <button type="submit">Save Google key</button>
+              <button type="button" id="toggle-key" class="ghost">Show</button>
+            </div>
+            <p id="api-key-status" class="status" aria-live="polite"></p>
+          </form>
+          <form id="parallel-key-form" class="stack key-block">
+            <label>
+              Parallel API key
+              <input
+                id="parallel-key-input"
+                type="password"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="Parallel key…"
+              />
+            </label>
+            <div class="row">
+              <button type="submit">Save Parallel key</button>
+              <button type="button" id="toggle-parallel-key" class="ghost">Show</button>
+            </div>
+            <p id="parallel-key-status" class="status" aria-live="polite"></p>
+          </form>
+          <form id="openai-key-form" class="stack key-block">
+            <label>
+              OpenAI API key
+              <input
+                id="openai-key-input"
+                type="password"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="sk-…"
+              />
+            </label>
+            <div class="row">
+              <button type="submit">Save OpenAI key</button>
+              <button type="button" id="toggle-openai-key" class="ghost">Show</button>
+            </div>
+            <p id="openai-key-status" class="status" aria-live="polite"></p>
+          </form>
+        </section>
+
+        <section class="panel">
+          <h2>Collect data</h2>
+          <p class="hint">
+            Uses <code>locationRestriction</code> viewports per neighborhood —
+            not address text filters. Dedupes on Places ID.
+          </p>
+          <form id="collect-form" class="stack">
+            <label>
+              Neighborhood
+              <select id="neighborhood" required></select>
+            </label>
+            <p id="query-meta" class="meta"></p>
+            <div class="row">
+              <button type="submit" id="collect-btn">Run collection</button>
+              <button type="button" id="cancel-btn" class="ghost" disabled>
+                Cancel
+              </button>
+            </div>
+            <p id="collect-status" class="status" aria-live="polite"></p>
+          </form>
+          <pre id="collect-log" class="log" hidden></pre>
+        </section>
+
+        <section class="panel">
+          <h2>Coffee content</h2>
+          <p class="hint">
+            Uses Parallel Extract on cafe websites for the selected neighborhood
+            (or all cafes when All Barcelona is selected). Skips rows that
+            already have <code>coffee_content</code>.
+          </p>
+          <div class="stack">
+            <div class="row">
+              <button type="button" id="coffee-fetch-btn">
+                Fetch coffee content
+              </button>
+              <button type="button" id="coffee-cancel-btn" class="ghost" disabled>
+                Cancel
+              </button>
+            </div>
+            <dl id="coffee-progress" class="stats coffee-stats">
+              <div>
+                <dt>Processing</dt>
+                <dd id="coffee-total">—</dd>
+              </div>
+              <div>
+                <dt>Completed</dt>
+                <dd id="coffee-completed">—</dd>
+              </div>
+              <div>
+                <dt>Skipped (filled)</dt>
+                <dd id="coffee-skipped">—</dd>
+              </div>
+            </dl>
+            <p id="coffee-status" class="status" aria-live="polite"></p>
+            <pre id="coffee-log" class="log" hidden></pre>
+          </div>
+        </section>
+
+        <section class="panel summary-panel">
+          <h2>RAG search</h2>
+          <p class="hint">
+            Location-aware hybrid search: if the query mentions a street,
+            landmark, or neighborhood, cafes are first filtered to a 1 km
+            radius (Google Geocoding + local coordinates), then ranked with
+            ChromaDB + BM25. Answers use only local cafe data.
+          </p>
+          <div class="stack">
+            <div class="row">
+              <button type="button" id="index-cafes-btn">Index cafes</button>
+              <span id="rag-index-meta" class="meta" style="margin:0"></span>
+            </div>
+            <p id="index-status" class="status" aria-live="polite"></p>
+            <form id="rag-search-form" class="stack">
+              <label>
+                Search
+                <input
+                  id="rag-query"
+                  type="search"
+                  placeholder="e.g. specialty filter coffee in Gràcia"
+                  required
+                />
+              </label>
+              <label>
+                Top results (context size)
+                <input
+                  id="rag-top-n"
+                  type="number"
+                  min="1"
+                  max="20"
+                  value="5"
+                  required
+                />
+              </label>
+              <div class="row">
+                <button type="submit" id="rag-search-btn">Search</button>
+              </div>
+            </form>
+            <p id="rag-search-status" class="status" aria-live="polite"></p>
+            <div id="rag-answer" class="answer-block" hidden>
+              <div id="rag-answer-text" class="answer-text"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel summary-panel">
+          <div class="row between">
+            <h2>Summary</h2>
+            <button type="button" id="refresh-summary" class="ghost">
+              Refresh
+            </button>
+          </div>
+          <p class="hint">Stats for the neighborhood selected above.</p>
+          <dl id="summary" class="stats">
+            <div>
+              <dt>Total cafes</dt>
+              <dd data-key="total_cafes">—</dd>
+            </div>
+            <div>
+              <dt>Average rating</dt>
+              <dd data-key="average_rating">—</dd>
+            </div>
+            <div>
+              <dt>With website</dt>
+              <dd data-key="with_website">—</dd>
+            </div>
+            <div>
+              <dt>With reviews</dt>
+              <dd data-key="with_reviews">—</dd>
+            </div>
+            <div>
+              <dt>With coordinates</dt>
+              <dd data-key="with_coordinates">—</dd>
+            </div>
+          </dl>
+          <div class="row">
+            <a id="export-link" class="button" href="#">Export CSV</a>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
