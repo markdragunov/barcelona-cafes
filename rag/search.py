@@ -56,6 +56,30 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / ((na ** 0.5) * (nb ** 0.5))
 
 
+def _as_sequence(value: Any) -> list[Any]:
+    """Normalize Chroma/numpy return values without boolean-testing arrays."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    # numpy arrays / array-likes: avoid `value or []` (ambiguous truth value).
+    try:
+        return list(value)
+    except TypeError:
+        return []
+
+
+def _embedding_to_list(emb: Any) -> list[float] | None:
+    if emb is None:
+        return None
+    if hasattr(emb, "tolist"):
+        emb = emb.tolist()
+    try:
+        return [float(x) for x in emb]
+    except (TypeError, ValueError):
+        return None
+
+
 def _vector_search_filtered(
     collection: Any,
     query_emb: list[float],
@@ -67,25 +91,29 @@ def _vector_search_filtered(
         ids=candidate_ids,
         include=["documents", "metadatas", "embeddings"],
     )
-    ids = got.get("ids") or []
-    docs = got.get("documents") or []
-    metas = got.get("metadatas") or []
-    embs = got.get("embeddings") or []
+    ids = _as_sequence(got.get("ids"))
+    docs = _as_sequence(got.get("documents"))
+    metas = _as_sequence(got.get("metadatas"))
+    embs = _as_sequence(got.get("embeddings"))
 
     scored: list[tuple[float, int]] = []
     for i, emb in enumerate(embs):
-        if emb is None:
+        vec = _embedding_to_list(emb)
+        if vec is None:
             continue
-        scored.append((_cosine_similarity(query_emb, list(emb)), i))
+        scored.append((_cosine_similarity(query_emb, vec), i))
     scored.sort(key=lambda x: x[0], reverse=True)
 
     hits: list[dict[str, Any]] = []
     for rank, (score, i) in enumerate(scored[:top_n], start=1):
+        meta = metas[i] if i < len(metas) else {}
+        if not isinstance(meta, dict):
+            meta = {}
         hits.append(
             {
                 "place_id": ids[i],
-                "document": docs[i],
-                "metadata": metas[i] or {},
+                "document": docs[i] if i < len(docs) else "",
+                "metadata": meta,
                 "rank": rank,
                 "score": float(score),
                 "source": "vector",
