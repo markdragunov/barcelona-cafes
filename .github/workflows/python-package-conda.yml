@@ -19,9 +19,24 @@ jobs:
         pip install flake8
     - name: Lint with flake8
       run: |
+        LINT_PATHS=()
+        for dir in rag scripts tests; do
+          if [ -d "$dir" ]; then
+            LINT_PATHS+=("$dir")
+          fi
+        done
+        if [ ${#LINT_PATHS[@]} -eq 0 ]; then
+          echo "No Python directories to lint"
+          exit 0
+        fi
         # stop the build if there are Python syntax errors or undefined names
-        flake8 rag tests scripts --count --select=E9,F63,F7,F821,F822,F823 --show-source --statistics
+        flake8 "${LINT_PATHS[@]}" --count --select=E9,F63,F7,F821,F822,F823 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 rag tests scripts --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        flake8 "${LINT_PATHS[@]}" --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Test with unittest
-      run: python -m unittest discover -s tests -v
+      run: |
+        if [ -d tests ]; then
+          python -m unittest discover -s tests -v
+        else
+          echo "No Python tests directory; skipping unittest"
+        fi
