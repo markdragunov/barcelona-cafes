@@ -59,6 +59,16 @@ npm run db:etl -- --sqlite ./data/cafes.db
 STORAGE_BACKEND=supabase npm start
 ```
 
+## Production (Docker on DigitalOcean)
+
+See [docs/production-runbook.md](docs/production-runbook.md) and [deploy/README.md](deploy/README.md).
+
+```bash
+./deploy/remote-setup.sh
+SYNC_DATA=0 ./deploy/sync-and-up.sh
+./deploy/smoke-test.sh
+```
+
 ## Setup
 
 ```bash
