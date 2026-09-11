@@ -9,22 +9,24 @@ Local service for collecting Barcelona coffee shops, enriching them with website
 3. **Index** combined coffee content + reviews (Chroma locally, pgvector in production) plus BM25  
 4. **Search** with location-aware hybrid retrieval + an OpenAI answer based only on retrieved cafes  
 
-Two UIs share the same backend:
+Same Express app, two hostnames in production:
 
-| URL | Purpose |
-|-----|---------|
-| http://localhost:3847/ | Public search page |
-| http://localhost:3847/admin | Admin: collection, extract, indexing, CSV export |
+| Surface | Local | Production |
+|---------|-------|------------|
+| Public search | http://localhost:3847/ | https://mark-d.dev/ |
+| Admin | http://localhost:3847/admin | https://admin.mark-d.dev/admin (or https://admin.mark-d.dev/ which redirects) |
+
+One Node/Express process serves both. Production public is Express `GET /` (`index.html` at the project root). Production admin is Caddy on `admin.mark-d.dev` redirecting `/` → `/admin`, with Express serving `public/index.html` at `/admin`.
 
 ## Architecture
 
 ```
 Browser
-  ├─ /            public search (index.html)
-  └─ /admin       admin UI (public/)
+  ├─ public search   /            (local :3847 or https://mark-d.dev/)
+  └─ admin UI        /admin       (local :3847/admin or https://admin.mark-d.dev/)
          │
          ▼
-   Express (src/server.js)     port 3847
+   Express (src/server.js)     port 3847   one process
          │
          ├─ sqlite+chroma      data/cafes.db + data/chroma/   (local default)
          ├─ supabase           Postgres + pgvector            (production)
