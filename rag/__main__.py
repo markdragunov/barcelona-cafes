@@ -26,7 +26,11 @@ def _require_api_key(explicit: str | None) -> str:
 
 
 def _google_api_key() -> str:
-    return (os.environ.get("GOOGLE_API_KEY") or "").strip()
+    return (
+        os.environ.get("GOOGLE_PLACES_API_KEY")
+        or os.environ.get("GOOGLE_API_KEY")
+        or ""
+    ).strip()
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -1,21 +1,33 @@
-node_modules/
-.venv/
-__pycache__/
-*.pyc
-*.pyo
-
-# Local secrets and env
+# Secrets
 .env
 .env.local
 .env.*.local
 
-# Runtime data / indexes (may contain API keys in settings)
-data/*.db
-data/*.db-*
+# Database
+*.db
+*.db-*
+*.sqlite3
 data/chroma/
 data/bm25_index.pkl
 
-.DS_Store
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Node
+node_modules/
+
+# Logs
 *.log
+logs/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Editors / IDE
 .idea/
 .vscode/

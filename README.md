@@ -14,7 +14,7 @@ Two UIs share the same backend:
 | URL | Purpose |
 |-----|---------|
 | http://localhost:3847/ | Public search page |
-| http://localhost:3847/admin | Admin: API keys, collection, extract, indexing, CSV export |
+| http://localhost:3847/admin | Admin: collection, extract, indexing, CSV export |
 
 ## Architecture
 
@@ -36,16 +36,16 @@ Browser
 
 - **Node / Express** — HTTP API, admin jobs, SQLite access  
 - **Python (`rag/`)** — indexing, hybrid search, location filter, LLM answer formatting  
-- **SQLite** — system of record (cafes, reviews, settings, coffee content)
+- **SQLite** — system of record (cafes, reviews, coffee content)
 
 ## Requirements
 
 - Node.js 18+ (tested with newer versions; uses built-in `node:sqlite`)
 - Python 3.9+
-- API keys (saved in admin, stored in SQLite — not in `.env`):
-  - **Google** — Places API (New) + Geocoding API (for location-aware search)
-  - **Parallel** — website extract
-  - **OpenAI** — embeddings + chat
+- API keys via `.env` (copy from `.env.example`):
+  - **Google** — `GOOGLE_PLACES_API_KEY` (or `GOOGLE_API_KEY`) for Places API (New) + Geocoding
+  - **Parallel** — `PARALLEL_API_KEY` for website extract
+  - **OpenAI** — `OPENAI_API_KEY` for embeddings + chat
 
 Enable **Geocoding API** on the same Google Cloud project as your key, and allow it under the key’s API restrictions.
 
@@ -56,6 +56,7 @@ git clone https://github.com/markdragunov/barcelona-cafes.git
 cd barcelona-cafes
 
 npm install
+cp .env.example .env   # then fill in API keys
 npm run setup:python   # or: python3 -m pip install -r requirements.txt
 
 npm start              # http://localhost:3847
@@ -77,7 +78,7 @@ npm run rag:status
 
 ### 1. Configure keys
 
-**Preferred:** copy `.env.example` → `.env` and set:
+Copy `.env.example` → `.env` and set real values (never commit `.env`):
 
 ```bash
 cp .env.example .env
@@ -89,9 +90,7 @@ cp .env.example .env
 | `PARALLEL_API_KEY` | Parallel Extract |
 | `OPENAI_API_KEY` | OpenAI embeddings + answers |
 
-`.env` is gitignored — never commit it.
-
-**Alternative:** open http://localhost:3847/admin and save the same keys into local SQLite (env vars still win if both are set).
+Admin (`/admin`) only shows whether each env var is loaded — it does not store keys.
 
 ### 2. Collect cafes
 
@@ -156,6 +155,7 @@ These paths are gitignored. Treat `cafes.db` as sensitive if it contains API key
 ├── public/              Admin UI assets
 ├── src/
 │   ├── server.js        Express app & API routes
+│   ├── config.js        API keys from environment (.env)
 │   ├── db.js            SQLite schema & helpers
 │   ├── places.js        Google Places collection
 │   ├── extract.js       Parallel Extract client

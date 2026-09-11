@@ -1,18 +1,9 @@
 const $ = (sel) => document.querySelector(sel);
 
 const neighborhoodSelect = $("#neighborhood");
-const apiKeyForm = $("#api-key-form");
-const apiKeyInput = $("#api-key-input");
 const apiKeyStatus = $("#api-key-status");
-const toggleKeyBtn = $("#toggle-key");
-const parallelKeyForm = $("#parallel-key-form");
-const parallelKeyInput = $("#parallel-key-input");
 const parallelKeyStatus = $("#parallel-key-status");
-const toggleParallelKeyBtn = $("#toggle-parallel-key");
-const openaiKeyForm = $("#openai-key-form");
-const openaiKeyInput = $("#openai-key-input");
 const openaiKeyStatus = $("#openai-key-status");
-const toggleOpenaiKeyBtn = $("#toggle-openai-key");
 const indexCafesBtn = $("#index-cafes-btn");
 const indexStatus = $("#index-status");
 const ragIndexMeta = $("#rag-index-meta");
@@ -82,30 +73,27 @@ async function loadNeighborhoods() {
 async function loadApiKeyStatus() {
   const data = await api("/api/settings/api-key");
   if (data.configured) {
-    setStatus(apiKeyStatus, `Saved key: ${data.masked}`, "ok");
-    apiKeyInput.placeholder = "Enter a new key to replace…";
+    setStatus(apiKeyStatus, ` — loaded from .env (${data.masked})`, "ok");
   } else {
-    setStatus(apiKeyStatus, "No Google API key saved yet.", "warn");
+    setStatus(apiKeyStatus, " — missing in .env", "warn");
   }
 }
 
 async function loadParallelKeyStatus() {
   const data = await api("/api/settings/parallel-api-key");
   if (data.configured) {
-    setStatus(parallelKeyStatus, `Saved key: ${data.masked}`, "ok");
-    parallelKeyInput.placeholder = "Enter a new key to replace…";
+    setStatus(parallelKeyStatus, ` — loaded from .env (${data.masked})`, "ok");
   } else {
-    setStatus(parallelKeyStatus, "No Parallel API key saved yet.", "warn");
+    setStatus(parallelKeyStatus, " — missing in .env", "warn");
   }
 }
 
 async function loadOpenaiKeyStatus() {
   const data = await api("/api/settings/openai-api-key");
   if (data.configured) {
-    setStatus(openaiKeyStatus, `Saved key: ${data.masked}`, "ok");
-    openaiKeyInput.placeholder = "Enter a new key to replace…";
+    setStatus(openaiKeyStatus, ` — loaded from .env (${data.masked})`, "ok");
   } else {
-    setStatus(openaiKeyStatus, "No OpenAI API key saved yet.", "warn");
+    setStatus(openaiKeyStatus, " — missing in .env", "warn");
   }
 }
 
@@ -282,69 +270,6 @@ async function startCoffeePolling() {
     });
   }, 1200);
 }
-
-apiKeyForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  try {
-    const apiKey = apiKeyInput.value.trim();
-    const data = await api("/api/settings/api-key", {
-      method: "POST",
-      body: JSON.stringify({ apiKey }),
-    });
-    apiKeyInput.value = "";
-    setStatus(apiKeyStatus, `Saved key: ${data.masked}`, "ok");
-  } catch (err) {
-    setStatus(apiKeyStatus, err.message, "err");
-  }
-});
-
-toggleKeyBtn.addEventListener("click", () => {
-  const showing = apiKeyInput.type === "text";
-  apiKeyInput.type = showing ? "password" : "text";
-  toggleKeyBtn.textContent = showing ? "Show" : "Hide";
-});
-
-parallelKeyForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  try {
-    const apiKey = parallelKeyInput.value.trim();
-    const data = await api("/api/settings/parallel-api-key", {
-      method: "POST",
-      body: JSON.stringify({ apiKey }),
-    });
-    parallelKeyInput.value = "";
-    setStatus(parallelKeyStatus, `Saved key: ${data.masked}`, "ok");
-  } catch (err) {
-    setStatus(parallelKeyStatus, err.message, "err");
-  }
-});
-
-toggleParallelKeyBtn.addEventListener("click", () => {
-  const showing = parallelKeyInput.type === "text";
-  parallelKeyInput.type = showing ? "password" : "text";
-  toggleParallelKeyBtn.textContent = showing ? "Show" : "Hide";
-});
-
-openaiKeyForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  try {
-    const apiKey = openaiKeyInput.value.trim();
-    const data = await api("/api/settings/openai-api-key", {
-      method: "POST",
-      body: JSON.stringify({ apiKey }),
-    });
-    openaiKeyInput.value = "";
-    setStatus(openaiKeyStatus, `Saved key: ${data.masked}`, "ok");
-  } catch (err) {
-    setStatus(openaiKeyStatus, err.message, "err");
-  }
-});
-
-toggleOpenaiKeyBtn.addEventListener("click", () => {
-  const showing = openaiKeyInput.type === "text";
-  openaiKeyInput.type = showing ? "password" : "text";
-  toggleOpenaiKeyBtn.textContent = showing ? "Show" : "Hide";
-});
 
 async function pollIndexStatus() {
   const data = await api("/api/rag/index/status");

@@ -4,11 +4,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   getApiKey,
-  setApiKey,
   getParallelApiKey,
-  setParallelApiKey,
   getOpenAiApiKey,
-  setOpenAiApiKey,
+} from "./config.js";
+import {
   getSummary,
   getCafesForExport,
   getCafesNeedingCoffeeContent,
@@ -61,6 +60,9 @@ function csvEscape(value) {
   return str;
 }
 
+const ENV_KEYS_HINT =
+  "Set secrets in the project .env file (see .env.example). They are not stored via the admin UI.";
+
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
@@ -80,16 +82,13 @@ app.get("/api/settings/api-key", (_req, res) => {
   res.json({
     configured: Boolean(key),
     masked: maskKey(key),
+    source: "env",
+    envVar: "GOOGLE_PLACES_API_KEY",
   });
 });
 
-app.post("/api/settings/api-key", (req, res) => {
-  const apiKey = String(req.body?.apiKey ?? "").trim();
-  if (!apiKey) {
-    return res.status(400).json({ error: "API key is required" });
-  }
-  setApiKey(apiKey);
-  res.json({ ok: true, configured: true, masked: maskKey(apiKey) });
+app.post("/api/settings/api-key", (_req, res) => {
+  res.status(405).json({ error: ENV_KEYS_HINT });
 });
 
 app.get("/api/settings/parallel-api-key", (_req, res) => {
@@ -97,16 +96,13 @@ app.get("/api/settings/parallel-api-key", (_req, res) => {
   res.json({
     configured: Boolean(key),
     masked: maskKey(key),
+    source: "env",
+    envVar: "PARALLEL_API_KEY",
   });
 });
 
-app.post("/api/settings/parallel-api-key", (req, res) => {
-  const apiKey = String(req.body?.apiKey ?? "").trim();
-  if (!apiKey) {
-    return res.status(400).json({ error: "API key is required" });
-  }
-  setParallelApiKey(apiKey);
-  res.json({ ok: true, configured: true, masked: maskKey(apiKey) });
+app.post("/api/settings/parallel-api-key", (_req, res) => {
+  res.status(405).json({ error: ENV_KEYS_HINT });
 });
 
 app.get("/api/settings/openai-api-key", (_req, res) => {
@@ -114,16 +110,13 @@ app.get("/api/settings/openai-api-key", (_req, res) => {
   res.json({
     configured: Boolean(key),
     masked: maskKey(key),
+    source: "env",
+    envVar: "OPENAI_API_KEY",
   });
 });
 
-app.post("/api/settings/openai-api-key", (req, res) => {
-  const apiKey = String(req.body?.apiKey ?? "").trim();
-  if (!apiKey) {
-    return res.status(400).json({ error: "API key is required" });
-  }
-  setOpenAiApiKey(apiKey);
-  res.json({ ok: true, configured: true, masked: maskKey(apiKey) });
+app.post("/api/settings/openai-api-key", (_req, res) => {
+  res.status(405).json({ error: ENV_KEYS_HINT });
 });
 
 app.get("/api/summary", (req, res) => {
@@ -212,7 +205,7 @@ app.post("/api/collect", async (req, res) => {
 
   const apiKey = getApiKey();
   if (!apiKey) {
-    return res.status(400).json({ error: "Save a Google Places API key first" });
+    return res.status(400).json({ error: "Set GOOGLE_PLACES_API_KEY in .env first" });
   }
 
   const neighborhoodId = String(req.body?.neighborhoodId || "");
@@ -317,7 +310,7 @@ app.post("/api/coffee-content/fetch", async (req, res) => {
   if (!apiKey) {
     return res
       .status(400)
-      .json({ error: "Save a Parallel API key first" });
+      .json({ error: "Set PARALLEL_API_KEY in .env first" });
   }
 
   const neighborhoodId = String(req.body?.neighborhoodId || "all-barcelona");
@@ -459,7 +452,7 @@ app.post("/api/rag/index", async (_req, res) => {
 
   const apiKey = getOpenAiApiKey();
   if (!apiKey) {
-    return res.status(400).json({ error: "Save an OpenAI API key first" });
+    return res.status(400).json({ error: "Set OPENAI_API_KEY in .env first" });
   }
 
   indexJob = {
@@ -494,14 +487,14 @@ app.post("/api/rag/index", async (_req, res) => {
 app.post("/api/rag/search", async (req, res) => {
   const apiKey = getOpenAiApiKey();
   if (!apiKey) {
-    return res.status(400).json({ error: "Save an OpenAI API key first" });
+    return res.status(400).json({ error: "Set OPENAI_API_KEY in .env first" });
   }
 
   const googleApiKey = getApiKey();
   if (!googleApiKey) {
     return res.status(400).json({
       error:
-        "Save a Google Places/Geocoding API key first (used for location-aware search)",
+        "Set GOOGLE_PLACES_API_KEY (or GOOGLE_API_KEY) in .env for location-aware search",
     });
   }
 

@@ -26,58 +26,23 @@
       <main class="grid">
         <section class="panel">
           <h2>API keys</h2>
-          <p class="hint">Stored locally in SQLite. Sent only to the matching provider.</p>
-          <form id="api-key-form" class="stack">
-            <label>
-              Google Places API (New) key
-              <input
-                id="api-key-input"
-                type="password"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="AIza…"
-              />
-            </label>
-            <div class="row">
-              <button type="submit">Save Google key</button>
-              <button type="button" id="toggle-key" class="ghost">Show</button>
-            </div>
-            <p id="api-key-status" class="status" aria-live="polite"></p>
-          </form>
-          <form id="parallel-key-form" class="stack key-block">
-            <label>
-              Parallel API key
-              <input
-                id="parallel-key-input"
-                type="password"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="Parallel key…"
-              />
-            </label>
-            <div class="row">
-              <button type="submit">Save Parallel key</button>
-              <button type="button" id="toggle-parallel-key" class="ghost">Show</button>
-            </div>
-            <p id="parallel-key-status" class="status" aria-live="polite"></p>
-          </form>
-          <form id="openai-key-form" class="stack key-block">
-            <label>
-              OpenAI API key
-              <input
-                id="openai-key-input"
-                type="password"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="sk-…"
-              />
-            </label>
-            <div class="row">
-              <button type="submit">Save OpenAI key</button>
-              <button type="button" id="toggle-openai-key" class="ghost">Show</button>
-            </div>
-            <p id="openai-key-status" class="status" aria-live="polite"></p>
-          </form>
+          <p class="hint">
+            Loaded from <code>.env</code> (see <code>.env.example</code>). Not stored in SQLite or editable here.
+          </p>
+          <div class="stack">
+            <p>
+              <code>GOOGLE_PLACES_API_KEY</code>
+              <span id="api-key-status" class="status" aria-live="polite"></span>
+            </p>
+            <p>
+              <code>PARALLEL_API_KEY</code>
+              <span id="parallel-key-status" class="status" aria-live="polite"></span>
+            </p>
+            <p>
+              <code>OPENAI_API_KEY</code>
+              <span id="openai-key-status" class="status" aria-live="polite"></span>
+            </p>
+          </div>
         </section>
 
         <section class="panel">
