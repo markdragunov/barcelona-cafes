@@ -18,7 +18,7 @@ Without a domain yet, the stack still runs on HTTP at `http://<IP>/` (Caddy list
 | `GOOGLE_PLACES_API_KEY` / `GOOGLE_API_KEY` | Places + Geocoding | `.env` on host / Docker env |
 | `PARALLEL_API_KEY` | Website extract | `.env` |
 | `OPENAI_API_KEY` | Embeddings + answers | `.env` |
-| `ADMIN_USER` / `ADMIN_PASSWORD` | App + proxy admin auth | `.env` (strong unique password) |
+| `ADMIN_USER` / `ADMIN_PASSWORD` | Legacy Basic auth fallback | `.env` — prefer magic link (`ADMIN_EMAILS` + Supabase) |
 | `DATA_DIR` | Persistent data path | `/data` in containers |
 | `DOMAIN` | Public hostname for TLS | production `.env` only |
 | `PORT` | Internal app port | `3847` (not exposed publicly) |
