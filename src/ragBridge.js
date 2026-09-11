@@ -17,6 +17,15 @@ export function runRag(
     const env = { ...process.env, PYTHONUNBUFFERED: "1" };
     if (openaiApiKey) env.OPENAI_API_KEY = openaiApiKey;
     if (googleApiKey) env.GOOGLE_API_KEY = googleApiKey;
+    // Keep Places + Geocoding aliases aligned for Python geocoder.
+    if (googleApiKey && !env.GOOGLE_PLACES_API_KEY) {
+      env.GOOGLE_PLACES_API_KEY = googleApiKey;
+    }
+    // STORAGE_BACKEND / DATABASE_URL / DATA_DIR inherited from process.env.
+    if (process.env.DATA_DIR) env.DATA_DIR = process.env.DATA_DIR;
+    if (process.env.STORAGE_BACKEND) env.STORAGE_BACKEND = process.env.STORAGE_BACKEND;
+    if (process.env.DATABASE_URL) env.DATABASE_URL = process.env.DATABASE_URL;
+    if (process.env.SQLITE_PATH) env.SQLITE_PATH = process.env.SQLITE_PATH;
 
     const pythonBin = process.env.PYTHON_BIN || "python3";
     const proc = spawn(pythonBin, ["-m", "rag", ...args], {

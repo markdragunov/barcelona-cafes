@@ -188,7 +188,7 @@ async function collectForQuery(apiKey, textQuery, neighborhood, onProgress) {
 
       const cafe = mapCafe(enriched, neighborhood);
       const reviews = mapReviews(cafe.place_id, enriched.reviews);
-      upsertCafeWithReviews(cafe, reviews);
+      await upsertCafeWithReviews(cafe, reviews);
       saved += 1;
     }
 

@@ -1,0 +1,26 @@
+# Postgres + pgvector for migrations, tests, and the droplet database.
+# The port is published on loopback only — never expose Postgres to the internet.
+# On the droplet, also apply docker-compose.pgvector.droplet.yml so the app can
+# reach this container over Docker DNS (db:5432).
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: barcelona_cafes
+    ports:
+      - "127.0.0.1:54329:5432"
+    volumes:
+      - pgvector-data:/var/lib/postgresql/data
+      - ./supabase/migrations:/migrations:ro
+      - ./scripts/docker-init-migrations.sh:/docker-entrypoint-initdb.d/10-migrations.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d barcelona_cafes"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  pgvector-data:

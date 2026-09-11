@@ -1,0 +1,17 @@
+# Droplet-only overlay: join the app stack's network so the API and RAG can use
+# DATABASE_URL=postgresql://postgres:...@db:5432/barcelona_cafes over Docker DNS.
+#
+#   docker compose -f docker-compose.pgvector.yml -f docker-compose.pgvector.droplet.yml \
+#     -p barcelona-cafes-pg up -d
+services:
+  db:
+    networks:
+      default:
+      appnet:
+        aliases:
+          - db
+
+networks:
+  appnet:
+    external: true
+    name: ${APP_NETWORK:-barcelona-cafes_internal}

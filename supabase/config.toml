@@ -1,0 +1,11 @@
+# Minimal config for CLI users who link a remote project.
+# Local testing uses docker-compose.pgvector.yml (see deploy/README / scripts).
+
+project_id = "barcelona-cafes"
+
+[api]
+enabled = false
+
+[db]
+port = 54322
+major_version = 16

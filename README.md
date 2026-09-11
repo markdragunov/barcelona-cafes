@@ -49,7 +49,28 @@ Browser
 
 Enable **Geocoding API** on the same Google Cloud project as your key, and allow it under the key’s API restrictions.
 
-## Setup
+## Database (Postgres + pgvector)
+
+Runtime requires `DATABASE_URL` (Supabase or local pgvector). See [docs/supabase.md](docs/supabase.md).
+
+```bash
+npm run db:up && npm run db:migrate
+npm run db:etl -- --sqlite ../barcelona-cafes/data/cafes.db
+npm start
+```
+
+## Production (Docker on DigitalOcean)
+
+See [docs/production-runbook.md](docs/production-runbook.md) and [deploy/README.md](deploy/README.md).
+
+```bash
+# fill .env including ADMIN_PASSWORD (and optional DOMAIN)
+./deploy/remote-setup.sh
+./deploy/sync-and-up.sh
+ADMIN_PASSWORD='…' ./deploy/smoke-test.sh
+```
+
+Public search: `http://<droplet-ip>/` · Admin: `http://<droplet-ip>/admin` (Basic auth).
 
 ```bash
 git clone https://github.com/markdragunov/barcelona-cafes.git
@@ -86,6 +107,8 @@ cp .env.example .env
 
 | Variable | Provider |
 |----------|----------|
+| `STORAGE_BACKEND` | `sqlite+chroma` (local) or `supabase` (Postgres + pgvector) |
+| `DATABASE_URL` | Required when `STORAGE_BACKEND=supabase` (never commit) |
 | `GOOGLE_PLACES_API_KEY` (or `GOOGLE_API_KEY`) | Google Places + Geocoding |
 | `PARALLEL_API_KEY` | Parallel Extract |
 | `OPENAI_API_KEY` | OpenAI embeddings + answers |
