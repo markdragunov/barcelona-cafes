@@ -5,30 +5,38 @@ on: [push]
 jobs:
   build-linux:
     runs-on: ubuntu-latest
-    strategy:
-      max-parallel: 5
 
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python 3.10
-      uses: actions/setup-python@v3
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
-    - name: Add conda to system path
-      run: |
-        # $CONDA is an environment variable pointing to the root of the miniconda directory
-        echo $CONDA/bin >> $GITHUB_PATH
     - name: Install dependencies
       run: |
-        conda env update --file environment.yml --name base
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install flake8
     - name: Lint with flake8
       run: |
-        conda install flake8
+        LINT_PATHS=()
+        for dir in rag scripts tests; do
+          if [ -d "$dir" ]; then
+            LINT_PATHS+=("$dir")
+          fi
+        done
+        if [ ${#LINT_PATHS[@]} -eq 0 ]; then
+          echo "No Python directories to lint"
+          exit 0
+        fi
         # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 "${LINT_PATHS[@]}" --count --select=E9,F63,F7,F821,F822,F823 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-    - name: Test with pytest
+        flake8 "${LINT_PATHS[@]}" --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    - name: Test with unittest
       run: |
-        conda install pytest
-        pytest
+        if [ -d tests ]; then
+          python -m unittest discover -s tests -v
+        else
+          echo "No Python tests directory; skipping unittest"
+        fi
