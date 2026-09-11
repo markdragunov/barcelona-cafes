@@ -75,13 +75,23 @@ npm run rag:status
 
 ## Typical workflow
 
-### 1. Configure keys (Admin)
+### 1. Configure keys
 
-Open http://localhost:3847/admin and save:
+**Preferred:** copy `.env.example` → `.env` and set:
 
-- Google Places / Geocoding API key  
-- Parallel API key  
-- OpenAI API key  
+```bash
+cp .env.example .env
+```
+
+| Variable | Provider |
+|----------|----------|
+| `GOOGLE_PLACES_API_KEY` (or `GOOGLE_API_KEY`) | Google Places + Geocoding |
+| `PARALLEL_API_KEY` | Parallel Extract |
+| `OPENAI_API_KEY` | OpenAI embeddings + answers |
+
+`.env` is gitignored — never commit it.
+
+**Alternative:** open http://localhost:3847/admin and save the same keys into local SQLite (env vars still win if both are set).
 
 ### 2. Collect cafes
 

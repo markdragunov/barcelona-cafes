@@ -69,8 +69,20 @@ export function setSetting(key, value) {
   ).run(key, value);
 }
 
+function envFirst(...names) {
+  for (const name of names) {
+    const value = String(process.env[name] ?? "").trim();
+    if (value) return value;
+  }
+  return null;
+}
+
+/** Prefer .env / process env; fall back to SQLite settings (admin UI). */
 export function getApiKey() {
-  return getSetting("google_places_api_key");
+  return (
+    envFirst("GOOGLE_PLACES_API_KEY", "GOOGLE_API_KEY") ||
+    getSetting("google_places_api_key")
+  );
 }
 
 export function setApiKey(apiKey) {
@@ -78,7 +90,7 @@ export function setApiKey(apiKey) {
 }
 
 export function getParallelApiKey() {
-  return getSetting("parallel_api_key");
+  return envFirst("PARALLEL_API_KEY") || getSetting("parallel_api_key");
 }
 
 export function setParallelApiKey(apiKey) {
@@ -86,7 +98,7 @@ export function setParallelApiKey(apiKey) {
 }
 
 export function getOpenAiApiKey() {
-  return getSetting("openai_api_key");
+  return envFirst("OPENAI_API_KEY") || getSetting("openai_api_key");
 }
 
 export function setOpenAiApiKey(apiKey) {
