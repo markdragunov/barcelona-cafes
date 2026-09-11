@@ -144,27 +144,108 @@ export async function requireAdmin(req, res, next) {
   return next();
 }
 
-/** Simple in-memory rate limit for public search (per IP). */
-export function rateLimit({ windowMs = 60_000, max = 30 } = {}) {
+/**
+ * Rate-limit key for a request.
+ *
+ * `req.ip` is resolved by Express from the `trust proxy` setting, so it is the
+ * address of the last untrusted hop. Reading `X-Forwarded-For` directly would
+ * let any caller rotate the header and get unlimited throughput.
+ *
+ * @param {import("express").Request} req
+ * @returns {string}
+ */
+function clientKey(req) {
+  return req.ip || req.socket?.remoteAddress || "unknown";
+}
+
+function setRetryAfter(res, resetAt, now) {
+  res.set("Retry-After", String(Math.max(1, Math.ceil((resetAt - now) / 1000))));
+}
+
+/** Drop expired buckets, then the oldest ones, to keep the map bounded. */
+function prune(hits, now, windowMs, maxKeys) {
+  for (const [key, bucket] of hits) {
+    if (now - bucket.start >= windowMs) hits.delete(key);
+  }
+  while (hits.size > maxKeys) {
+    const oldest = hits.keys().next().value;
+    if (oldest === undefined) break;
+    hits.delete(oldest);
+  }
+}
+
+/** Simple in-memory rate limit for public search (per client address). */
+export function rateLimit({
+  windowMs = 60_000,
+  max = 30,
+  maxKeys = 20_000,
+} = {}) {
   const hits = new Map();
 
   return (req, res, next) => {
-    const ip =
-      req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
-      req.socket.remoteAddress ||
-      "unknown";
     const now = Date.now();
-    let bucket = hits.get(ip);
+    if (hits.size > maxKeys) prune(hits, now, windowMs, maxKeys);
+
+    const key = clientKey(req);
+    let bucket = hits.get(key);
     if (!bucket || now - bucket.start >= windowMs) {
       bucket = { start: now, count: 0 };
-      hits.set(ip, bucket);
+      hits.set(key, bucket);
     }
     bucket.count += 1;
     if (bucket.count > max) {
+      setRetryAfter(res, bucket.start + windowMs, now);
       return res
         .status(429)
         .json({ error: "Too many search requests. Try again shortly." });
     }
+    return next();
+  };
+}
+
+/**
+ * Ceiling on total requests per window, ignoring who is calling. Per-client
+ * limits do nothing against a flood spread over many addresses; this bounds
+ * the worst-case spend regardless of how the traffic is distributed.
+ */
+export function globalRateLimit({ windowMs = 60_000, max = 120 } = {}) {
+  let start = Date.now();
+  let count = 0;
+
+  return (_req, res, next) => {
+    const now = Date.now();
+    if (now - start >= windowMs) {
+      start = now;
+      count = 0;
+    }
+    count += 1;
+    if (count > max) {
+      setRetryAfter(res, start + windowMs, now);
+      return res.status(429).json({
+        error: "Search is busy right now. Try again in a minute.",
+      });
+    }
+    return next();
+  };
+}
+
+/**
+ * Validate a public search query before any billable work happens: an
+ * unbounded body would otherwise be embedded and charged in full.
+ * Stores the normalized query on `req.searchQuery`.
+ */
+export function validateSearchQuery({ maxChars = 300 } = {}) {
+  return (req, res, next) => {
+    const query = String(req.body?.query ?? "").trim();
+    if (!query) {
+      return res.status(400).json({ error: "Query is required" });
+    }
+    if (query.length > maxChars) {
+      return res.status(400).json({
+        error: `Query is too long. Use ${maxChars} characters or fewer.`,
+      });
+    }
+    req.searchQuery = query;
     return next();
   };
 }

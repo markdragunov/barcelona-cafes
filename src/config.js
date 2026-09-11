@@ -17,6 +17,15 @@ function env(...names) {
   return "";
 }
 
+/** Integer env value, clamped to [min, max]; falls back when unset or unparseable. */
+function envInt(name, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
+  const raw = env(name);
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(parsed)));
+}
+
 export function getDataDir() {
   const configured = env("DATA_DIR");
   if (configured) return path.resolve(configured);
@@ -33,6 +42,45 @@ export function getParallelApiKey() {
 
 export function getOpenAiApiKey() {
   return env("OPENAI_API_KEY");
+}
+
+/*
+ * Public search limits. /api/rag/search is unauthenticated and every call bills
+ * an OpenAI embedding, an OpenAI completion and often a Google geocode, so the
+ * endpoint needs both per-client and absolute ceilings.
+ */
+
+/** Window shared by the per-client and global search limits. */
+export function getSearchRateLimitWindowMs() {
+  return envInt("SEARCH_RATE_LIMIT_WINDOW_MS", 60_000, {
+    min: 1_000,
+    max: 3_600_000,
+  });
+}
+
+/** Per-client search requests allowed per window. */
+export function getSearchRateLimitMax() {
+  return envInt("SEARCH_RATE_LIMIT_MAX", 30, { min: 1 });
+}
+
+/** Search requests allowed per window across all clients combined. */
+export function getSearchGlobalRateLimitMax() {
+  return envInt("SEARCH_GLOBAL_RATE_LIMIT_MAX", 120, { min: 1 });
+}
+
+/** Longest search query accepted before anything is sent to OpenAI. */
+export function getSearchMaxQueryChars() {
+  return envInt("SEARCH_MAX_QUERY_CHARS", 300, { min: 16, max: 4_000 });
+}
+
+/** Lifetime of a cached search answer. 0 disables the cache. */
+export function getSearchCacheTtlMs() {
+  return envInt("SEARCH_CACHE_TTL_MS", 300_000, { min: 0, max: 3_600_000 });
+}
+
+/** Cached search answers kept in memory before the oldest are evicted. */
+export function getSearchCacheMaxEntries() {
+  return envInt("SEARCH_CACHE_MAX_ENTRIES", 200, { min: 1, max: 10_000 });
 }
 
 export function getAdminUser() {

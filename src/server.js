@@ -11,6 +11,12 @@ import {
   isSupabaseAdminAuthEnabled,
   getSupabaseUrl,
   getSupabaseAnonKey,
+  getSearchRateLimitWindowMs,
+  getSearchRateLimitMax,
+  getSearchGlobalRateLimitMax,
+  getSearchMaxQueryChars,
+  getSearchCacheTtlMs,
+  getSearchCacheMaxEntries,
 } from "./config.js";
 import {
   getSummary,
@@ -28,7 +34,14 @@ import { collectCafes } from "./places.js";
 import { extractCoffeeContent } from "./extract.js";
 import { SEARCH_QUERIES } from "./queries.js";
 import { runRag } from "./ragBridge.js";
-import { requireAdmin, rateLimit, requestLog } from "./middleware.js";
+import {
+  requireAdmin,
+  rateLimit,
+  globalRateLimit,
+  validateSearchQuery,
+  requestLog,
+} from "./middleware.js";
+import { createSearchCache, searchCacheKey } from "./searchCache.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -101,7 +114,22 @@ function csvEscape(value) {
 const ENV_KEYS_HINT =
   "Set secrets in the project .env file (see .env.example). They are not stored via the admin UI.";
 
-const searchRateLimit = rateLimit({ windowMs: 60_000, max: 30 });
+const SEARCH_WINDOW_MS = getSearchRateLimitWindowMs();
+const searchRateLimit = rateLimit({
+  windowMs: SEARCH_WINDOW_MS,
+  max: getSearchRateLimitMax(),
+});
+const searchGlobalRateLimit = globalRateLimit({
+  windowMs: SEARCH_WINDOW_MS,
+  max: getSearchGlobalRateLimitMax(),
+});
+const searchQueryGuard = validateSearchQuery({
+  maxChars: getSearchMaxQueryChars(),
+});
+const searchCache = createSearchCache({
+  ttlMs: getSearchCacheTtlMs(),
+  maxEntries: getSearchCacheMaxEntries(),
+});
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
@@ -576,50 +604,61 @@ app.post("/api/rag/index", async (_req, res) => {
   }
 });
 
-app.post("/api/rag/search", searchRateLimit, async (req, res) => {
-  const apiKey = getOpenAiApiKey();
-  if (!apiKey) {
-    return res.status(400).json({ error: "Set OPENAI_API_KEY in .env first" });
-  }
+app.post(
+  "/api/rag/search",
+  searchGlobalRateLimit,
+  searchRateLimit,
+  searchQueryGuard,
+  async (req, res) => {
+    const apiKey = getOpenAiApiKey();
+    if (!apiKey) {
+      return res.status(400).json({ error: "Set OPENAI_API_KEY in .env first" });
+    }
 
-  const googleApiKey = getApiKey();
-  if (!googleApiKey) {
-    return res.status(400).json({
-      error:
-        "Set GOOGLE_PLACES_API_KEY (or GOOGLE_API_KEY) in .env for location-aware search",
-    });
-  }
+    const googleApiKey = getApiKey();
+    if (!googleApiKey) {
+      return res.status(400).json({
+        error:
+          "Set GOOGLE_PLACES_API_KEY (or GOOGLE_API_KEY) in .env for location-aware search",
+      });
+    }
 
-  const query = String(req.body?.query ?? "").trim();
-  if (!query) {
-    return res.status(400).json({ error: "Query is required" });
-  }
+    const query = req.searchQuery;
 
-  let topN = Number(req.body?.topN ?? 5);
-  if (!Number.isFinite(topN)) topN = 5;
-  topN = Math.max(1, Math.min(20, Math.round(topN)));
+    let topN = Number(req.body?.topN ?? 5);
+    if (!Number.isFinite(topN)) topN = 5;
+    topN = Math.max(1, Math.min(20, Math.round(topN)));
 
-  try {
-    const result = await runRag(
-      ["search", "--query", query, "--top-n", String(topN)],
-      {
-        timeoutMs: 180_000,
-        openaiApiKey: apiKey,
-        googleApiKey,
-      }
-    );
-    res.json({
-      answer: result.answer,
-      top_n: result.top_n,
-      results: result.results ?? [],
-      vector_count: result.vector_count,
-      bm25_count: result.bm25_count,
-      location: result.location ?? null,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message || String(err) });
+    const cacheKey = searchCacheKey(query, topN);
+    const cached = searchCache.get(cacheKey);
+    if (cached) {
+      return res.json({ ...cached, cached: true });
+    }
+
+    try {
+      const result = await runRag(
+        ["search", "--query", query, "--top-n", String(topN)],
+        {
+          timeoutMs: 180_000,
+          openaiApiKey: apiKey,
+          googleApiKey,
+        }
+      );
+      const payload = {
+        answer: result.answer,
+        top_n: result.top_n,
+        results: result.results ?? [],
+        vector_count: result.vector_count,
+        bm25_count: result.bm25_count,
+        location: result.location ?? null,
+      };
+      searchCache.set(cacheKey, payload);
+      res.json(payload);
+    } catch (err) {
+      res.status(500).json({ error: err.message || String(err) });
+    }
   }
-});
+);
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(

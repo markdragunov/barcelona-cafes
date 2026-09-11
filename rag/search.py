@@ -281,11 +281,14 @@ def hybrid_search_and_answer(
                 "bm25_count": 0,
                 "location": {
                     "applied": True,
+                    "requested": True,
                     "location": location_info.get("location"),
                     "location_type": location_info.get("location_type"),
                     "coordinates": location_info.get("coordinates"),
                     "radius_km": location_info.get("radius_km"),
                     "cafe_count": 0,
+                    "source": location_info.get("source"),
+                    "notice": None,
                 },
             }
         allowed = set(place_ids)
@@ -299,7 +302,7 @@ def hybrid_search_and_answer(
     merged = merge_hybrid(vector_hits, bm25_hits, top_n)
     answer = answer_with_llm(client, query, merged)
 
-    return {
+    payload: dict[str, Any] = {
         "answer": answer,
         "top_n": top_n,
         "results": [
@@ -320,10 +323,19 @@ def hybrid_search_and_answer(
         "bm25_count": len(bm25_hits),
         "location": {
             "applied": bool(location_info.get("applied")),
+            "requested": bool(location_info.get("requested")),
             "location": location_info.get("location"),
             "location_type": location_info.get("location_type"),
             "coordinates": location_info.get("coordinates"),
             "radius_km": location_info.get("radius_km"),
             "cafe_count": location_info.get("cafe_count"),
+            "source": location_info.get("source"),
+            "notice": location_info.get("notice"),
         },
     }
+
+    # Server-side only: Node logs this and never forwards it to the client.
+    if location_info.get("error"):
+        payload["location_error"] = location_info["error"]
+
+    return payload
