@@ -2,6 +2,18 @@
  * Secrets and runtime config from environment (.env via dotenv).
  * Never hardcode API keys here.
  */
+import "dotenv/config";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.join(__dirname, "..");
+
+export function getDataDir() {
+  const configured = env("DATA_DIR");
+  if (configured) return path.resolve(configured);
+  return path.join(ROOT, "data");
+}
 
 function env(...names) {
   for (const name of names) {

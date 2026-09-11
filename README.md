@@ -49,6 +49,16 @@ Browser
 
 Enable **Geocoding API** on the same Google Cloud project as your key, and allow it under the key’s API restrictions.
 
+## Database (Postgres + pgvector)
+
+Optional. Local default is SQLite + Chroma. See [docs/supabase.md](docs/supabase.md).
+
+```bash
+npm run db:up && npm run db:migrate
+npm run db:etl -- --sqlite ./data/cafes.db
+STORAGE_BACKEND=supabase npm start
+```
+
 ## Setup
 
 ```bash
@@ -86,6 +96,8 @@ cp .env.example .env
 
 | Variable | Provider |
 |----------|----------|
+| `STORAGE_BACKEND` | `sqlite+chroma` (local) or `supabase` (Postgres + pgvector) |
+| `DATABASE_URL` | Required when `STORAGE_BACKEND=supabase` (never commit) |
 | `GOOGLE_PLACES_API_KEY` (or `GOOGLE_API_KEY`) | Google Places + Geocoding |
 | `PARALLEL_API_KEY` | Parallel Extract |
 | `OPENAI_API_KEY` | OpenAI embeddings + answers |

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import math
-import sqlite3
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -12,7 +11,8 @@ from typing import Any
 
 from openai import OpenAI
 
-from .paths import CHAT_MODEL, DB_PATH
+from .paths import CHAT_MODEL
+from .stores.factory import get_repository
 
 RADIUS_KM = 1.0
 LOCATION_PROMPT = """Extract a location reference from the user query about Barcelona coffee shops.
@@ -119,28 +119,16 @@ def cafes_within_radius(
     latitude: float, longitude: float, radius_km: float = RADIUS_KM
 ) -> list[str]:
     """Return place_ids of cafes within radius_km of the point."""
-    if not DB_PATH.exists():
-        return []
+    rows = get_repository().list_cafe_coordinates()
 
-    conn = sqlite3.connect(str(DB_PATH))
-    try:
-        rows = conn.execute(
-            """
-            SELECT place_id, latitude, longitude
-            FROM cafes
-            WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-            """
-        ).fetchall()
-    finally:
-        conn.close()
-
-    # Rough bounding box first to cut distance checks.
-    # 1 deg lat ~ 111 km; lon scaled by cos(lat).
     lat_delta = radius_km / 111.0
     lon_delta = radius_km / max(0.01, 111.0 * math.cos(math.radians(latitude)))
 
     matched: list[str] = []
-    for place_id, lat, lon in rows:
+    for row in rows:
+        place_id = row["place_id"]
+        lat = row["latitude"]
+        lon = row["longitude"]
         try:
             lat_f = float(lat)
             lon_f = float(lon)
