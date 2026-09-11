@@ -13,7 +13,9 @@ npm run db:migrate     # python3 scripts/apply_migrations.py
 
 Default local URL: `postgresql://postgres:postgres@127.0.0.1:54329/barcelona_cafes`
 
-The container publishes **loopback only**.
+The container publishes **loopback only**. On the droplet, add
+`docker-compose.pgvector.droplet.yml` so the app can reach it as `db:5432`.
+See [`deploy/README.md`](../deploy/README.md).
 
 ## ETL from SQLite
 ```bash
