@@ -18,7 +18,8 @@ export function runRag(
     if (openaiApiKey) env.OPENAI_API_KEY = openaiApiKey;
     if (googleApiKey) env.GOOGLE_API_KEY = googleApiKey;
 
-    const proc = spawn("python3", ["-m", "rag", ...args], {
+    const pythonBin = process.env.PYTHON_BIN || "python3";
+    const proc = spawn(pythonBin, ["-m", "rag", ...args], {
       cwd: ROOT,
       env,
     });

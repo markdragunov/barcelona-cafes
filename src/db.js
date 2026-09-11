@@ -69,30 +69,6 @@ export function setSetting(key, value) {
   ).run(key, value);
 }
 
-export function getApiKey() {
-  return getSetting("google_places_api_key");
-}
-
-export function setApiKey(apiKey) {
-  setSetting("google_places_api_key", apiKey);
-}
-
-export function getParallelApiKey() {
-  return getSetting("parallel_api_key");
-}
-
-export function setParallelApiKey(apiKey) {
-  setSetting("parallel_api_key", apiKey);
-}
-
-export function getOpenAiApiKey() {
-  return getSetting("openai_api_key");
-}
-
-export function setOpenAiApiKey(apiKey) {
-  setSetting("openai_api_key", apiKey);
-}
-
 const upsertCafeStmt = db.prepare(`
   INSERT INTO cafes (
     place_id, name, address, rating, user_rating_count, website,
