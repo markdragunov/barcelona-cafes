@@ -119,22 +119,22 @@ app.post("/api/settings/openai-api-key", (_req, res) => {
   res.status(405).json({ error: ENV_KEYS_HINT });
 });
 
-app.get("/api/summary", (req, res) => {
+app.get("/api/summary", async (req, res) => {
   const neighborhoodId = String(req.query.neighborhood || "all-barcelona");
   if (!getNeighborhood(neighborhoodId)) {
     return res.status(400).json({ error: "Unknown neighborhood" });
   }
-  res.json(getSummary(neighborhoodId));
+  res.json(await getSummary(neighborhoodId));
 });
 
-app.get("/api/export.csv", (req, res) => {
+app.get("/api/export.csv", async (req, res) => {
   const neighborhoodId = String(req.query.neighborhood || "all-barcelona");
   const neighborhood = getNeighborhood(neighborhoodId);
   if (!neighborhood) {
     return res.status(400).json({ error: "Unknown neighborhood" });
   }
 
-  const cafes = getCafesForExport(neighborhoodId);
+  const cafes = await getCafesForExport(neighborhoodId);
   const header = [
     "place_id",
     "name",
@@ -318,8 +318,8 @@ app.post("/api/coffee-content/fetch", async (req, res) => {
     return res.status(400).json({ error: "Unknown neighborhood" });
   }
 
-  const toProcess = getCafesNeedingCoffeeContent(neighborhoodId);
-  const skipped = countCafesWithCoffeeContent(neighborhoodId);
+  const toProcess = await getCafesNeedingCoffeeContent(neighborhoodId);
+  const skipped = await countCafesWithCoffeeContent(neighborhoodId);
 
   const controller = new AbortController();
   coffeeJob = {
@@ -374,7 +374,7 @@ app.post("/api/coffee-content/fetch", async (req, res) => {
 
       try {
         const content = await extractCoffeeContent(apiKey, cafe.website);
-        updateCoffeeContent(cafe.place_id, content);
+        await updateCoffeeContent(cafe.place_id, content);
         coffeeJob.completed += 1;
         pushLog({
           stage: "saved",

@@ -1,7 +1,7 @@
 # Secrets
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # Database
 *.db
@@ -23,6 +23,7 @@ node_modules/
 # Logs
 *.log
 logs/
+backups/
 
 # System files
 .DS_Store
