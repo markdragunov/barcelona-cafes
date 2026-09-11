@@ -7,17 +7,20 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "rag:status": "python3 -m rag status",
-    "setup:python": "python3 -m pip install -r requirements.txt",
     "test": "node --test test/**/*.test.js",
     "test:py": "python3 -m unittest tests.test_storage_contract -v",
+    "rag:status": "python3 -m rag status",
+    "setup:python": "python3 -m pip install -r requirements.txt",
     "db:up": "./scripts/pgvector-up.sh",
     "db:migrate": "python3 scripts/apply_migrations.py",
-    "db:etl": "python3 scripts/migrate_sqlite_to_supabase.py"
+    "db:etl": "python3 scripts/migrate_sqlite_to_supabase.py",
+    "admin:invite": "node scripts/invite-admin.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
     "dotenv": "^17.4.2",
     "express": "^4.21.2",
+    "jose": "^5.10.0",
     "pg": "^8.23.0"
   }
 }

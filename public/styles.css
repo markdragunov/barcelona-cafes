@@ -288,13 +288,12 @@ button.ghost,
   white-space: pre-wrap;
 }
 
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.login-page .panel {
+  max-width: 28rem;
 }
+
+#admin-app[hidden],
+#login-gate[hidden] {
+  display: none !important;
+}
+

@@ -51,12 +51,12 @@ Enable **Geocoding API** on the same Google Cloud project as your key, and allow
 
 ## Database (Postgres + pgvector)
 
-Optional. Local default is SQLite + Chroma. See [docs/supabase.md](docs/supabase.md).
+Runtime requires `DATABASE_URL` (Supabase or local pgvector). See [docs/supabase.md](docs/supabase.md).
 
 ```bash
 npm run db:up && npm run db:migrate
-npm run db:etl -- --sqlite ./data/cafes.db
-STORAGE_BACKEND=supabase npm start
+npm run db:etl -- --sqlite ../barcelona-cafes/data/cafes.db
+npm start
 ```
 
 ## Production (Docker on DigitalOcean)
@@ -64,12 +64,13 @@ STORAGE_BACKEND=supabase npm start
 See [docs/production-runbook.md](docs/production-runbook.md) and [deploy/README.md](deploy/README.md).
 
 ```bash
+# fill .env including ADMIN_PASSWORD (and optional DOMAIN)
 ./deploy/remote-setup.sh
-SYNC_DATA=0 ./deploy/sync-and-up.sh
-./deploy/smoke-test.sh
+./deploy/sync-and-up.sh
+ADMIN_PASSWORD='…' ./deploy/smoke-test.sh
 ```
 
-## Setup
+Public search: `http://<droplet-ip>/` · Admin: `http://<droplet-ip>/admin` (Basic auth).
 
 ```bash
 git clone https://github.com/markdragunov/barcelona-cafes.git
