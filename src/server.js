@@ -6,6 +6,17 @@ import {
   getApiKey,
   getParallelApiKey,
   getOpenAiApiKey,
+  getDataDir,
+  isAdminAuthEnabled,
+  isSupabaseAdminAuthEnabled,
+  getSupabaseUrl,
+  getSupabaseAnonKey,
+  getSearchRateLimitWindowMs,
+  getSearchRateLimitMax,
+  getSearchGlobalRateLimitMax,
+  getSearchMaxQueryChars,
+  getSearchCacheTtlMs,
+  getSearchCacheMaxEntries,
 } from "./config.js";
 import {
   getSummary,
@@ -23,6 +34,14 @@ import { collectCafes } from "./places.js";
 import { extractCoffeeContent } from "./extract.js";
 import { SEARCH_QUERIES } from "./queries.js";
 import { runRag } from "./ragBridge.js";
+import {
+  requireAdmin,
+  rateLimit,
+  globalRateLimit,
+  validateSearchQuery,
+  requestLog,
+} from "./middleware.js";
+import { createSearchCache, searchCacheKey } from "./searchCache.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -30,7 +49,39 @@ const PUBLIC = path.join(ROOT, "public");
 const app = express();
 const PORT = process.env.PORT || 3847;
 
+app.set("trust proxy", 1);
+app.use(requestLog);
 app.use(express.json({ limit: "2mb" }));
+
+/** Public routes stay open; admin ops APIs require auth. */
+app.use((req, res, next) => {
+  if (req.path === "/api/health" || req.path === "/api/ready") return next();
+  if (req.path === "/api/auth/config") return next();
+  if (req.method === "POST" && req.path === "/api/rag/search") return next();
+  if (req.method === "GET" && req.path === "/") return next();
+  if (
+    req.method === "GET" &&
+    (req.path === "/admin" || req.path === "/admin/")
+  ) {
+    // Magic link: the login UI must load anonymously.
+    // Basic: keep the page gated so the browser prompts here and then attaches
+    // credentials to the admin fetches that follow.
+    if (isSupabaseAdminAuthEnabled()) return next();
+    return requireAdmin(req, res, next);
+  }
+  if (
+    req.method === "GET" &&
+    !req.path.startsWith("/api") &&
+    req.path !== "/admin" &&
+    !req.path.startsWith("/admin/")
+  ) {
+    return next();
+  }
+  if (req.path.startsWith("/api/")) {
+    return requireAdmin(req, res, next);
+  }
+  return next();
+});
 
 // Public search page (project root). Admin stays under /admin.
 app.get("/", (_req, res) => {
@@ -63,8 +114,77 @@ function csvEscape(value) {
 const ENV_KEYS_HINT =
   "Set secrets in the project .env file (see .env.example). They are not stored via the admin UI.";
 
+const SEARCH_WINDOW_MS = getSearchRateLimitWindowMs();
+const searchRateLimit = rateLimit({
+  windowMs: SEARCH_WINDOW_MS,
+  max: getSearchRateLimitMax(),
+});
+const searchGlobalRateLimit = globalRateLimit({
+  windowMs: SEARCH_WINDOW_MS,
+  max: getSearchGlobalRateLimitMax(),
+});
+const searchQueryGuard = validateSearchQuery({
+  maxChars: getSearchMaxQueryChars(),
+});
+const searchCache = createSearchCache({
+  ttlMs: getSearchCacheTtlMs(),
+  maxEntries: getSearchCacheMaxEntries(),
+});
+
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
+});
+
+app.get("/api/auth/config", (_req, res) => {
+  if (!isSupabaseAdminAuthEnabled()) {
+    return res.json({
+      authMode: isAdminAuthEnabled() ? "basic" : "open",
+      supabaseUrl: null,
+      supabaseAnonKey: null,
+    });
+  }
+  res.json({
+    authMode: "magic_link",
+    supabaseUrl: getSupabaseUrl(),
+    supabaseAnonKey: getSupabaseAnonKey(),
+  });
+});
+
+app.get("/api/auth/me", (req, res) => {
+  res.json({
+    email: req.admin?.email || null,
+    authMode: isSupabaseAdminAuthEnabled()
+      ? "magic_link"
+      : isAdminAuthEnabled()
+        ? "basic"
+        : "open",
+  });
+});
+
+app.get("/api/ready", async (_req, res) => {
+  try {
+    const summary = await getSummary("all-barcelona");
+    const status = await runRag(["status"], { timeoutMs: 60_000 });
+    const ready =
+      Boolean(status.ready) &&
+      Number(status.document_count ?? 0) > 0 &&
+      Number(summary.total_cafes ?? 0) > 0;
+    const payload = {
+      ready,
+      cafes: summary.total_cafes ?? 0,
+      documents: status.document_count ?? 0,
+      indexing: Boolean(indexJob?.running),
+      dataDir: getDataDir(),
+      adminAuth: isAdminAuthEnabled(),
+    };
+    res.status(ready ? 200 : 503).json(payload);
+  } catch (err) {
+    res.status(503).json({
+      ready: false,
+      error: err.message || String(err),
+      dataDir: getDataDir(),
+    });
+  }
 });
 
 app.get("/api/neighborhoods", (_req, res) => {
@@ -484,51 +604,69 @@ app.post("/api/rag/index", async (_req, res) => {
   }
 });
 
-app.post("/api/rag/search", async (req, res) => {
-  const apiKey = getOpenAiApiKey();
-  if (!apiKey) {
-    return res.status(400).json({ error: "Set OPENAI_API_KEY in .env first" });
+app.post(
+  "/api/rag/search",
+  searchGlobalRateLimit,
+  searchRateLimit,
+  searchQueryGuard,
+  async (req, res) => {
+    const apiKey = getOpenAiApiKey();
+    if (!apiKey) {
+      return res.status(400).json({ error: "Set OPENAI_API_KEY in .env first" });
+    }
+
+    const googleApiKey = getApiKey();
+    if (!googleApiKey) {
+      return res.status(400).json({
+        error:
+          "Set GOOGLE_PLACES_API_KEY (or GOOGLE_API_KEY) in .env for location-aware search",
+      });
+    }
+
+    const query = req.searchQuery;
+
+    let topN = Number(req.body?.topN ?? 5);
+    if (!Number.isFinite(topN)) topN = 5;
+    topN = Math.max(1, Math.min(20, Math.round(topN)));
+
+    const cacheKey = searchCacheKey(query, topN);
+    const cached = searchCache.get(cacheKey);
+    if (cached) {
+      return res.json({ ...cached, cached: true });
+    }
+
+    try {
+      const result = await runRag(
+        ["search", "--query", query, "--top-n", String(topN)],
+        {
+          timeoutMs: 180_000,
+          openaiApiKey: apiKey,
+          googleApiKey,
+        }
+      );
+      const payload = {
+        answer: result.answer,
+        top_n: result.top_n,
+        results: result.results ?? [],
+        vector_count: result.vector_count,
+        bm25_count: result.bm25_count,
+        location: result.location ?? null,
+      };
+      searchCache.set(cacheKey, payload);
+      res.json(payload);
+    } catch (err) {
+      res.status(500).json({ error: err.message || String(err) });
+    }
   }
+);
 
-  const googleApiKey = getApiKey();
-  if (!googleApiKey) {
-    return res.status(400).json({
-      error:
-        "Set GOOGLE_PLACES_API_KEY (or GOOGLE_API_KEY) in .env for location-aware search",
-    });
-  }
-
-  const query = String(req.body?.query ?? "").trim();
-  if (!query) {
-    return res.status(400).json({ error: "Query is required" });
-  }
-
-  let topN = Number(req.body?.topN ?? 5);
-  if (!Number.isFinite(topN)) topN = 5;
-  topN = Math.max(1, Math.min(20, Math.round(topN)));
-
-  try {
-    const result = await runRag(
-      ["search", "--query", query, "--top-n", String(topN)],
-      {
-        timeoutMs: 180_000,
-        openaiApiKey: apiKey,
-        googleApiKey,
-      }
-    );
-    res.json({
-      answer: result.answer,
-      top_n: result.top_n,
-      results: result.results ?? [],
-      vector_count: result.vector_count,
-      bm25_count: result.bm25_count,
-      location: result.location ?? null,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message || String(err) });
-  }
-});
-
-app.listen(PORT, () => {
-  console.log(`Barcelona cafes admin → http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(
+    JSON.stringify({
+      msg: "server_listen",
+      port: Number(PORT),
+      dataDir: getDataDir(),
+      adminAuth: isAdminAuthEnabled(),
+    })
+  );
 });

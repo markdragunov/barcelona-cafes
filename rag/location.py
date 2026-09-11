@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -11,6 +12,7 @@ from typing import Any
 
 from openai import OpenAI
 
+from .neighborhoods import find_neighborhood
 from .paths import CHAT_MODEL
 from .stores.factory import get_repository
 
@@ -141,35 +143,89 @@ def cafes_within_radius(
     return matched
 
 
+def resolve_point(google_api_key: str, location: str) -> dict[str, Any]:
+    """
+    Resolve a location string to coordinates.
+
+    Known neighborhoods come from the shared gazetteer with no network call;
+    everything else falls back to the Google Geocoding API.
+    """
+    known = find_neighborhood(location)
+    if known:
+        return {
+            "latitude": known["centroid"]["latitude"],
+            "longitude": known["centroid"]["longitude"],
+            "formatted_address": f"{known['name']}, Barcelona, Spain",
+            "query": location,
+            "source": "gazetteer",
+        }
+
+    geo = geocode_location(google_api_key, location)
+    return {**geo, "source": "geocode"}
+
+
 def resolve_location_filter(
     openai_client: OpenAI, google_api_key: str, query: str
 ) -> dict[str, Any]:
     """
     Detect location in query and return filter metadata.
     place_ids is None when no location filter should be applied.
+
+    Resolving coordinates is best-effort: if it fails the search still runs,
+    unfiltered, with `requested` true and `applied` false.
     """
     detected = extract_location(openai_client, query)
     if not detected:
         return {
             "applied": False,
+            "requested": False,
             "location": None,
             "coordinates": None,
             "place_ids": None,
             "cafe_count": None,
+            "source": None,
+            "notice": None,
         }
 
-    geo = geocode_location(google_api_key, detected["location"])
-    place_ids = cafes_within_radius(geo["latitude"], geo["longitude"], RADIUS_KM)
+    location = detected["location"]
+    try:
+        point = resolve_point(google_api_key, location)
+    except Exception as err:  # noqa: BLE001 - location filtering is optional
+        # Detail stays server-side; the caller only sees `notice`.
+        print(
+            json.dumps({"msg": "location_resolve_failed", "error": str(err)}),
+            file=sys.stderr,
+        )
+        return {
+            "applied": False,
+            "requested": True,
+            "location": location,
+            "location_type": detected.get("location_type"),
+            "coordinates": None,
+            "place_ids": None,
+            "cafe_count": None,
+            "source": None,
+            "notice": (
+                f"Couldn't pin down '{location}' just now, "
+                "so these results cover all of Barcelona."
+            ),
+            "error": str(err),
+        }
+
+    place_ids = cafes_within_radius(point["latitude"], point["longitude"], RADIUS_KM)
     return {
         "applied": True,
-        "location": detected["location"],
+        "requested": True,
+        "location": location,
         "location_type": detected.get("location_type"),
         "coordinates": {
-            "latitude": geo["latitude"],
-            "longitude": geo["longitude"],
-            "formatted_address": geo["formatted_address"],
+            "latitude": point["latitude"],
+            "longitude": point["longitude"],
+            "formatted_address": point["formatted_address"],
         },
         "radius_km": RADIUS_KM,
         "place_ids": place_ids,
         "cafe_count": len(place_ids),
+        "source": point["source"],
+        "notice": None,
     }
