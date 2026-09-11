@@ -69,42 +69,6 @@ export function setSetting(key, value) {
   ).run(key, value);
 }
 
-function envFirst(...names) {
-  for (const name of names) {
-    const value = String(process.env[name] ?? "").trim();
-    if (value) return value;
-  }
-  return null;
-}
-
-/** Prefer .env / process env; fall back to SQLite settings (admin UI). */
-export function getApiKey() {
-  return (
-    envFirst("GOOGLE_PLACES_API_KEY", "GOOGLE_API_KEY") ||
-    getSetting("google_places_api_key")
-  );
-}
-
-export function setApiKey(apiKey) {
-  setSetting("google_places_api_key", apiKey);
-}
-
-export function getParallelApiKey() {
-  return envFirst("PARALLEL_API_KEY") || getSetting("parallel_api_key");
-}
-
-export function setParallelApiKey(apiKey) {
-  setSetting("parallel_api_key", apiKey);
-}
-
-export function getOpenAiApiKey() {
-  return envFirst("OPENAI_API_KEY") || getSetting("openai_api_key");
-}
-
-export function setOpenAiApiKey(apiKey) {
-  setSetting("openai_api_key", apiKey);
-}
-
 const upsertCafeStmt = db.prepare(`
   INSERT INTO cafes (
     place_id, name, address, rating, user_rating_count, website,
