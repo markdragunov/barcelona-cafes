@@ -9,21 +9,21 @@ Local service for collecting Barcelona coffee shops, enriching them with website
 3. **Index** combined coffee content + reviews (Chroma locally, pgvector in production) plus BM25  
 4. **Search** with location-aware hybrid retrieval + an OpenAI answer based only on retrieved cafes  
 
-Same Express app, two hostnames in production:
+Same Express app on one production host:
 
 | Surface | Local | Production |
 |---------|-------|------------|
 | Public search | http://localhost:3847/ | https://mark-d.dev/ |
-| Admin | http://localhost:3847/admin | https://admin.mark-d.dev/admin (or https://admin.mark-d.dev/ which redirects) |
+| Admin | http://localhost:3847/admin | https://mark-d.dev/admin |
 
-One Node/Express process serves both. Production public is Express `GET /` (`index.html` at the project root). Production admin is Caddy on `admin.mark-d.dev` redirecting `/` → `/admin`, with Express serving `public/index.html` at `/admin`.
+One Node/Express process serves both. Production public is Express `GET /` (`index.html` at the project root). Production admin is Express serving `public/index.html` at `/admin`.
 
 ## Architecture
 
 ```
 Browser
   ├─ public search   /            (local :3847 or https://mark-d.dev/)
-  └─ admin UI        /admin       (local :3847/admin or https://admin.mark-d.dev/)
+  └─ admin UI        /admin       (local :3847/admin or https://mark-d.dev/admin)
          │
          ▼
    Express (src/server.js)     port 3847   one process
@@ -96,7 +96,7 @@ npm run rag:status
 
 ## Production (Docker on DigitalOcean)
 
-Docker + Caddy on the droplet. Public: `https://mark-d.dev` · Admin: `https://admin.mark-d.dev` (`DOMAIN` / `ADMIN_DOMAIN`).
+Docker + Caddy on the droplet. Public: `https://mark-d.dev` · Admin: `https://mark-d.dev/admin` (`DOMAIN`).
 
 Admin is **magic-link** (Supabase Auth + `ADMIN_EMAILS`). `ADMIN_PASSWORD` Basic auth is a legacy fallback when Supabase Auth env is incomplete.
 
