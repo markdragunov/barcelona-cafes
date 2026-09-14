@@ -730,14 +730,16 @@ const server = app.listen(PORT, "0.0.0.0", () => {
       adminAuth: isAdminAuthEnabled(),
     })
   );
-  warmupRagWorker().catch((err) => {
-    console.error(
-      JSON.stringify({
-        msg: "rag_worker_warmup_failed",
-        error: err.message || String(err),
-      })
-    );
-  });
+  Promise.resolve()
+    .then(() => warmupRagWorker())
+    .catch((err) => {
+      console.error(
+        JSON.stringify({
+          msg: "rag_worker_warmup_failed",
+          error: err.message || String(err),
+        })
+      );
+    });
 });
 
 function abortJobs() {

@@ -27,6 +27,10 @@ function ragEnv({ openaiApiKey, googleApiKey } = {}) {
   return env;
 }
 
+function pythonBin() {
+  return process.env.PYTHON_BIN || "python3";
+}
+
 export function parseLastJsonLine(stdout) {
   const lines = String(stdout || "")
     .trim()
