@@ -1,18 +1,9 @@
+import { formatFetchError } from "./http.js";
+
 const EXTRACT_URL = "https://api.parallel.ai/v1/extract";
 
 export const COFFEE_EXTRACT_OBJECTIVE =
   "Find all information about coffee beans, bean origin, roast profiles, brew methods, espresso, filter coffee, menu items, and any other coffee-related content.";
-
-function formatFetchError(err) {
-  const cause = err?.cause;
-  if (cause?.code === "ENOTFOUND") {
-    return `Network/DNS failed reaching Parallel API (${cause.hostname}).`;
-  }
-  if (cause?.code === "ECONNREFUSED" || cause?.code === "ETIMEDOUT") {
-    return `Network error talking to Parallel API (${cause.code}).`;
-  }
-  return cause?.message || err?.message || String(err);
-}
 
 /**
  * Call Parallel Extract API for a single cafe website.
@@ -33,7 +24,7 @@ export async function extractCoffeeContent(apiKey, websiteUrl) {
       }),
     });
   } catch (err) {
-    throw new Error(formatFetchError(err));
+    throw new Error(formatFetchError(err, "Parallel API"));
   }
 
   const text = await response.text();

@@ -8,7 +8,7 @@ Until `topcafes.fyi` has a DNS A record, `mark-d.dev` is still routed to **produ
 
 ### Domain & DNS
 - [ ] Register domain `topcafes.fyi`
-- [ ] Cloudflare A `@` → `164.90.200.60` (DNS only / grey cloud until TLS works)
+- [ ] Cloudflare A `@` → `YOUR_DROPLET_IP` (DNS only / grey cloud until TLS works)
 - [ ] Set `DOMAIN=topcafes.fyi` (and after cutover `SANDBOX_DOMAIN=mark-d.dev`) in production `.env`
 - [ ] Wait for DNS, confirm Caddy issues TLS for topcafes.fyi
 - [ ] Supabase Auth Site URL + redirects for all three `/admin` URLs
@@ -31,7 +31,7 @@ Never commit `.env`. Recreate secrets from a password manager on the server.
 
 ### Google Cloud key restrictions
 - [ ] Enable **Places API (New)** and **Geocoding API** on the project
-- [ ] Application restriction: **IP addresses** → add droplet egress IP `164.90.200.60`
+- [ ] Application restriction: **IP addresses** → add the droplet's egress IP (confirm with `curl -4 ifconfig.me` on the host)
 - [ ] API restriction: allow Places API (New) + Geocoding API only
 - [ ] Verify from server: location query like `coffee near Sagrada Familia` succeeds
 

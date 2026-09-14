@@ -27,8 +27,37 @@ function ragEnv({ openaiApiKey, googleApiKey } = {}) {
   return env;
 }
 
-function pythonBin() {
-  return process.env.PYTHON_BIN || "python3";
+export function parseLastJsonLine(stdout) {
+  const lines = String(stdout || "")
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    try {
+      return JSON.parse(lines[i]);
+    } catch {
+      // Libraries (Chroma, OpenAI telemetry) sometimes print after the payload.
+    }
+  }
+  return null;
+}
+
+function killProcess(proc, { termMs = 5_000 } = {}) {
+  if (!proc) return;
+  try {
+    proc.kill("SIGTERM");
+  } catch {
+    return;
+  }
+  const killer = setTimeout(() => {
+    try {
+      proc.kill("SIGKILL");
+    } catch {
+      // already gone
+    }
+  }, termMs);
+  killer.unref();
+  proc.once("exit", () => clearTimeout(killer));
 }
 
 export function parseRagArgs(args) {
@@ -148,12 +177,7 @@ function stopWorkerProcess() {
   worker = null;
   workerReady = null;
   stdoutBuf = "";
-  if (!proc) return;
-  try {
-    proc.kill("SIGTERM");
-  } catch {
-    // already gone
-  }
+  killProcess(proc);
 }
 
 export function shutdownRagWorker() {
@@ -201,7 +225,7 @@ function runRagOnce(args, { timeoutMs, openaiApiKey, googleApiKey }) {
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => {
-      proc.kill("SIGTERM");
+      killProcess(proc);
       reject(new Error(`RAG command timed out after ${timeoutMs}ms`));
     }, timeoutMs);
 
@@ -217,23 +241,12 @@ function runRagOnce(args, { timeoutMs, openaiApiKey, googleApiKey }) {
     });
     proc.on("close", (code) => {
       clearTimeout(timer);
-      const line = stdout.trim().split("\n").filter(Boolean).pop();
-      if (!line) {
+      const data = parseLastJsonLine(stdout);
+      if (!data) {
         reject(
           new Error(
             stderr.trim() ||
               `RAG process exited with code ${code} and no JSON output`
-          )
-        );
-        return;
-      }
-      let data;
-      try {
-        data = JSON.parse(line);
-      } catch {
-        reject(
-          new Error(
-            `Invalid RAG JSON: ${line.slice(0, 200)}${stderr ? ` | ${stderr.slice(0, 300)}` : ""}`
           )
         );
         return;

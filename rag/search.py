@@ -14,6 +14,7 @@ from .index import indexes_ready
 from .location import resolve_location_filter
 from .paths import CHAT_MODEL, EMBEDDING_MODEL
 from .stores.factory import get_index_store, get_repository
+from .text import tokenize
 
 REASONING_PROMPT = """You help recommend Barcelona coffee shops.
 Use ONLY the provided cafe data. No outside knowledge.
@@ -34,18 +35,21 @@ Rules:
 RRF_K = 60
 
 
-def _tokenize(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9àáâãäåæçèéêëìíîïñòóôõöùúûüýÿ]+", text.lower())
+def retrieval_pool_size(top_n: int) -> int:
+    """Retrievers over-fetch so RRF can fuse wide lists before the final slice."""
+    return max(50, int(top_n) * 10)
+
+
+def _embed_query(client: OpenAI, query: str) -> list[float]:
+    return client.embeddings.create(model=EMBEDDING_MODEL, input=[query]).data[0].embedding
 
 
 def _vector_search(
-    client: OpenAI,
-    query: str,
+    query_embedding: list[float],
     top_n: int,
     allowed_place_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    emb = client.embeddings.create(model=EMBEDDING_MODEL, input=[query]).data[0].embedding
-    return get_index_store().vector_search(emb, top_n, allowed_place_ids)
+    return get_index_store().vector_search(query_embedding, top_n, allowed_place_ids)
 
 
 def _bm25_search(
@@ -60,7 +64,7 @@ def _bm25_search(
     metadatas = payload["metadatas"]
     if not place_ids:
         return []
-    tokens = _tokenize(query)
+    tokens = tokenize(query)
     if not tokens:
         return []
     scores = bm25.get_scores(tokens)
@@ -298,42 +302,23 @@ def hybrid_search_and_answer(
 
     client = OpenAI(api_key=openai_api_key)
 
-    location_info = resolve_location_filter(google_api_key or "", query)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        fut_loc = pool.submit(resolve_location_filter, google_api_key or "", query)
+        fut_emb = pool.submit(_embed_query, client, query)
+        location_info = fut_loc.result()
+        query_emb = fut_emb.result()
+
     allowed: set[str] | None = None
     if location_info["applied"]:
         place_ids = location_info.get("place_ids") or []
-        if not place_ids:
-            loc = location_info.get("location") or "that location"
-            return {
-                "answer": (
-                    f"I couldn't find cafes within 1 km of {loc} "
-                    "in the local database. Try a broader area."
-                ),
-                "intro": (
-                    f"I couldn't find cafes within 1 km of {loc} "
-                    "in the local database. Try a broader area."
-                ),
-                "top_n": top_n,
-                "results": [],
-                "vector_count": 0,
-                "bm25_count": 0,
-                "location": {
-                    "applied": True,
-                    "requested": True,
-                    "location": location_info.get("location"),
-                    "location_type": location_info.get("location_type"),
-                    "coordinates": location_info.get("coordinates"),
-                    "radius_km": location_info.get("radius_km"),
-                    "cafe_count": 0,
-                    "source": location_info.get("source"),
-                    "notice": None,
-                },
-            }
-        allowed = set(place_ids)
+        if place_ids:
+            allowed = set(place_ids)
+
+    retrieve_n = retrieval_pool_size(top_n)
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        fut_v = pool.submit(_vector_search, client, query, top_n * 2, allowed)
-        fut_b = pool.submit(_bm25_search, query, top_n * 2, allowed)
+        fut_v = pool.submit(_vector_search, query_emb, retrieve_n, allowed)
+        fut_b = pool.submit(_bm25_search, query, retrieve_n, allowed)
         vector_hits = fut_v.result()
         bm25_hits = fut_b.result()
 

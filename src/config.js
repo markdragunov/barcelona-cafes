@@ -68,6 +68,11 @@ export function getSearchGlobalRateLimitMax() {
   return envInt("SEARCH_GLOBAL_RATE_LIMIT_MAX", 120, { min: 1 });
 }
 
+/** Search requests allowed per UTC day across all clients combined. */
+export function getSearchDailyGlobalMax() {
+  return envInt("SEARCH_DAILY_GLOBAL_MAX", 2000, { min: 1 });
+}
+
 /** Longest search query accepted before anything is sent to OpenAI. */
 export function getSearchMaxQueryChars() {
   return envInt("SEARCH_MAX_QUERY_CHARS", 300, { min: 16, max: 4_000 });

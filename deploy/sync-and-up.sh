@@ -3,8 +3,12 @@
 # Never copies local data/ onto the server unless you set SYNC_DATA=1.
 set -euo pipefail
 
-REMOTE="${REMOTE:-root@164.90.200.60}"
-SSH_KEY="${SSH_KEY:-$HOME/.ssh/do_ed25519}"
+REMOTE="${REMOTE:-}"
+SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
+if [[ -z "$REMOTE" ]]; then
+  echo "Set REMOTE=user@YOUR_DROPLET_IP (and optionally SSH_KEY)." >&2
+  exit 1
+fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Default 0: live Postgres/volume must not be replaced by an empty laptop data/.
 SYNC_DATA="${SYNC_DATA:-0}"

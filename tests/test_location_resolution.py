@@ -40,7 +40,7 @@ class GazetteerLookupTests(unittest.TestCase):
     def test_unknown_and_citywide_locations_do_not_match(self) -> None:
         from rag.neighborhoods import find_neighborhood
 
-        for location in ("Sagrada Familia", "All Barcelona", "all-barcelona", "", "   "):
+        for location in ("Unknown Place XYZ", "All Barcelona", "all-barcelona", "", "   "):
             with self.subTest(location=location):
                 self.assertIsNone(find_neighborhood(location))
 
@@ -101,13 +101,13 @@ class ResolveLocationFilterTests(unittest.TestCase):
 
     def test_unknown_location_still_uses_geocoding(self) -> None:
         result, geocode_mock = self._resolve(
-            {"location": "Sagrada Familia", "location_type": "landmark"},
+            {"location": "Carrer de Pau Claris", "location_type": "area"},
             {
                 "return_value": {
-                    "latitude": 41.4036,
-                    "longitude": 2.1744,
-                    "formatted_address": "Sagrada Família, Barcelona, Spain",
-                    "query": "Sagrada Familia",
+                    "latitude": 41.392,
+                    "longitude": 2.165,
+                    "formatted_address": "Carrer de Pau Claris, Barcelona, Spain",
+                    "query": "Carrer de Pau Claris",
                 }
             },
         )
@@ -118,7 +118,7 @@ class ResolveLocationFilterTests(unittest.TestCase):
 
     def test_geocoding_failure_degrades_instead_of_raising(self) -> None:
         result, _ = self._resolve(
-            {"location": "Sagrada Familia", "location_type": "landmark"},
+            {"location": "Carrer de Pau Claris", "location_type": "area"},
             {"side_effect": RuntimeError(GEOCODE_ERROR)},
         )
 
@@ -153,6 +153,7 @@ class DegradedSearchTests(unittest.TestCase):
             mock.patch.object(
                 location_mod, "geocode_location", side_effect=RuntimeError(GEOCODE_ERROR)
             ), \
+            mock.patch.object(search_mod, "_embed_query", return_value=[0.1, 0.2]), \
             mock.patch.object(search_mod, "_vector_search", return_value=[]) as vector_mock, \
             mock.patch.object(search_mod, "_bm25_search", return_value=[]) as bm25_mock, \
             mock.patch.object(search_mod, "recommend_cafes", return_value={
@@ -165,7 +166,7 @@ class DegradedSearchTests(unittest.TestCase):
             )
 
         # Retrieval ran with no place_id allowlist -> citywide search.
-        self.assertIsNone(vector_mock.call_args.args[3])
+        self.assertIsNone(vector_mock.call_args.args[2])
         self.assertIsNone(bm25_mock.call_args.args[2])
 
         self.assertEqual(result["answer"], "An answer.")
@@ -175,6 +176,56 @@ class DegradedSearchTests(unittest.TestCase):
         # Upstream detail is available server-side but never inside `location`.
         self.assertIn("164.90.200.60", result["location_error"])
         self.assertNotIn("164.90.200.60", json.dumps(result["location"]))
+
+
+    def test_known_landmark_skips_the_geocoding_api(self) -> None:
+        from rag.neighborhoods import find_landmark
+
+        match = find_landmark("Sagrada Familia")
+        self.assertIsNotNone(match)
+        self.assertEqual(match["id"], "sagrada-familia")
+
+    def test_expands_radius_when_inner_ring_is_empty(self) -> None:
+        from rag import location as location_mod
+
+        calls: list[float] = []
+
+        def fake_radius(_lat, _lon, radius_km=1.0):
+            calls.append(radius_km)
+            if radius_km < 2.5:
+                return []
+            return ["pid-far"]
+
+        with mock.patch.object(
+            location_mod,
+            "extract_location",
+            return_value={"location": "Gràcia", "location_type": "neighborhood"},
+        ), mock.patch.object(
+            location_mod, "cafes_within_radius", side_effect=fake_radius
+        ):
+            result = location_mod.resolve_location_filter("test-key", "coffee in Gràcia")
+
+        self.assertEqual(calls, [1.0, 2.0, 3.0])
+        self.assertTrue(result["applied"])
+        self.assertEqual(result["radius_km"], 3.0)
+        self.assertEqual(result["place_ids"], ["pid-far"])
+        self.assertIn("1 km", result["notice"])
+
+    def test_empty_after_cascade_falls_back_citywide(self) -> None:
+        from rag import location as location_mod
+
+        with mock.patch.object(
+            location_mod,
+            "extract_location",
+            return_value={"location": "Gràcia", "location_type": "neighborhood"},
+        ), mock.patch.object(
+            location_mod, "cafes_within_radius", return_value=[]
+        ):
+            result = location_mod.resolve_location_filter("test-key", "coffee in Gràcia")
+
+        self.assertFalse(result["applied"])
+        self.assertTrue(result["requested"])
+        self.assertIn("all of Barcelona", result["notice"])
 
 
 class DeterministicLocationExtractionTests(unittest.TestCase):
@@ -195,8 +246,8 @@ class DeterministicLocationExtractionTests(unittest.TestCase):
         from rag.location import extract_location
 
         detected = extract_location("specialty coffee near Sagrada Familia")
-        self.assertEqual(detected["location"], "Sagrada Familia")
-        self.assertEqual(detected["location_type"], "area")
+        self.assertEqual(detected["location"], "Sagrada Família")
+        self.assertEqual(detected["location_type"], "landmark")
 
     def test_city_only_and_unlocated_queries_are_ignored(self) -> None:
         from rag.location import extract_location

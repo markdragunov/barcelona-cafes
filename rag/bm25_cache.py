@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-import re
 import threading
 from typing import Any
 
 from rank_bm25 import BM25Okapi
 
+from .text import tokenize
+
 _lock = threading.RLock()
 _cache: dict[str, Any] | None = None
-
-
-def _tokenize(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9àáâãäåæçèéêëìíîïñòóôõöùúûüýÿ]+", text.lower())
 
 
 def clear_cache() -> None:
@@ -26,7 +23,7 @@ def rebuild_from_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     place_ids = [r["place_id"] for r in rows]
     documents = [r.get("document_text") or r.get("document") or "" for r in rows]
     metadatas = [r.get("metadata") or {} for r in rows]
-    tokenized = [_tokenize(t) for t in documents]
+    tokenized = [tokenize(t) for t in documents]
     bm25 = BM25Okapi(tokenized) if tokenized else BM25Okapi([["empty"]])
     payload = {
         "place_ids": place_ids,

@@ -16,13 +16,14 @@ One Caddy (production compose `proxy`) owns :80/:443:
 Do not create `admin.topcafes.fyi` / `admin.mark-d.dev` unless you set `ADMIN_DOMAIN`.
 
 ## Prerequisites
-- Droplet SSH (`REMOTE=root@164.90.200.60`, key `~/.ssh/do_ed25519`)
+- Droplet SSH: `export REMOTE=user@YOUR_DROPLET_IP` and optionally `SSH_KEY` (scripts refuse to run without `REMOTE`)
 - Local `.env` with API keys + `ADMIN_PASSWORD` (used for **production** sync)
 - Prefer **4 GB RAM**. The current 1 GB droplet can run two stacks only with swap; expect pressure.
 
 ## First-time setup
 ```bash
 chmod +x deploy/*.sh
+export REMOTE=user@YOUR_DROPLET_IP
 ./deploy/remote-setup.sh
 SYNC_DATA=0 TARGET=prod ./deploy/sync-and-up.sh
 SYNC_DATA=0 TARGET=sandbox ./deploy/sync-and-up.sh
@@ -52,7 +53,7 @@ SANDBOX_DOMAIN=
 
 so `https://mark-d.dev` still serves the 636-cafe production database.
 
-When `topcafes.fyi` A `@` → `164.90.200.60` (Cloudflare **DNS only** / grey cloud until Let's Encrypt succeeds):
+When `topcafes.fyi` A `@` → `YOUR_DROPLET_IP` (Cloudflare **DNS only** / grey cloud until Let's Encrypt succeeds):
 
 ```
 DOMAIN=topcafes.fyi
@@ -92,8 +93,8 @@ BASE_URL=https://topcafes.fyi ./deploy/smoke-test.sh
 
 ## HTTPS / DNS
 1. Cloudflare DNS only (grey cloud) until Caddy has certificates:
-   - `topcafes.fyi` A `@` → `164.90.200.60`
-   - `mark-d.dev` A `@` → `164.90.200.60`
+   - `topcafes.fyi` A `@` → `YOUR_DROPLET_IP`
+   - `mark-d.dev` A `@` → `YOUR_DROPLET_IP`
 2. No `admin` A record required.
 3. Recreate `proxy` after changing `DOMAIN` / `SANDBOX_DOMAIN`.
 

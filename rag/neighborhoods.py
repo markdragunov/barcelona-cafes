@@ -15,6 +15,7 @@ from typing import Any
 from .paths import ROOT
 
 GAZETTEER_PATH = ROOT / "shared" / "neighborhoods.json"
+LANDMARKS_PATH = ROOT / "shared" / "landmarks.json"
 
 # Catalan/Spanish/English articles that users add or drop interchangeably.
 _ARTICLES = ("el ", "la ", "l ", "els ", "les ", "los ", "las ", "the ")
@@ -93,21 +94,21 @@ def _latin_alias_in_query(key: str, normalized_query: str) -> bool:
     return False
 
 
-def find_neighborhood_in_query(query: str) -> dict[str, Any] | None:
-    """Scan a full user query for a known neighborhood name or alias."""
+def _scan_named_places(
+    entries: list[dict[str, Any]], query: str
+) -> dict[str, Any] | None:
     if not (query or "").strip():
         return None
     folded = query.casefold()
     normalized = normalize_name(query)
     best: dict[str, Any] | None = None
     best_len = 0
-    for entry in load_neighborhoods():
-        if entry.get("aggregate"):
-            continue
+    for entry in entries:
         record = {
             "id": entry["id"],
             "name": entry["name"],
-            "centroid": _centroid(entry["viewport"]),
+            "centroid": entry["centroid"],
+            "kind": entry.get("kind") or "place",
         }
         names = [entry["id"], entry["name"], *entry.get("aliases", [])]
         for name in names:
@@ -123,3 +124,75 @@ def find_neighborhood_in_query(query: str) -> dict[str, Any] | None:
                 best = record
                 best_len = len(raw)
     return best
+
+
+def find_neighborhood_in_query(query: str) -> dict[str, Any] | None:
+    """Scan a full user query for a known neighborhood name or alias."""
+    entries = []
+    for entry in load_neighborhoods():
+        if entry.get("aggregate"):
+            continue
+        entries.append(
+            {
+                "id": entry["id"],
+                "name": entry["name"],
+                "aliases": entry.get("aliases", []),
+                "centroid": _centroid(entry["viewport"]),
+                "kind": "neighborhood",
+            }
+        )
+    return _scan_named_places(entries, query)
+
+
+@lru_cache(maxsize=1)
+def load_landmarks() -> list[dict[str, Any]]:
+    with LANDMARKS_PATH.open(encoding="utf-8") as fh:
+        return json.load(fh)["landmarks"]
+
+
+@lru_cache(maxsize=1)
+def _landmark_index() -> dict[str, dict[str, Any]]:
+    index: dict[str, dict[str, Any]] = {}
+    for entry in load_landmarks():
+        record = {
+            "id": entry["id"],
+            "name": entry["name"],
+            "centroid": {
+                "latitude": float(entry["latitude"]),
+                "longitude": float(entry["longitude"]),
+            },
+            "kind": "landmark",
+        }
+        names = [entry["id"], entry["name"], *entry.get("aliases", [])]
+        for name in names:
+            key = normalize_name(name)
+            if not key:
+                continue
+            index.setdefault(key, record)
+            index.setdefault(key.replace(" ", ""), record)
+    return index
+
+
+def find_landmark(location: str) -> dict[str, Any] | None:
+    key = normalize_name(location)
+    if not key:
+        return None
+    index = _landmark_index()
+    return index.get(key) or index.get(key.replace(" ", ""))
+
+
+def find_landmark_in_query(query: str) -> dict[str, Any] | None:
+    entries = [
+        {
+            "id": entry["id"],
+            "name": entry["name"],
+            "aliases": entry.get("aliases", []),
+            "centroid": {
+                "latitude": float(entry["latitude"]),
+                "longitude": float(entry["longitude"]),
+            },
+            "kind": "landmark",
+        }
+        for entry in load_landmarks()
+    ]
+    return _scan_named_places(entries, query)
