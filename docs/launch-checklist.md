@@ -18,9 +18,8 @@
 - [ ] `/admin` prompts for Basic auth
 
 ## Cutover
-- [ ] DNS A record → droplet IP (if using `DOMAIN`)
-- [ ] Re-deploy so Caddy issues TLS cert
-- [ ] Confirm `https://DOMAIN/` and `https://DOMAIN/admin`
+- [ ] DNS A `@` for `topcafes.fyi` → `164.90.200.60` (grey cloud until cert)
+- [ ] Confirm `https://topcafes.fyi/` and `/admin`; sandbox remains `https://mark-d.dev/`
 - [ ] Firewall: 22/80/443 only; 3847 closed
 - [ ] Cron backup present (`crontab -l`)
 

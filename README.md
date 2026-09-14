@@ -9,12 +9,12 @@ Local service for collecting Barcelona coffee shops, enriching them with website
 3. **Index** combined coffee content + reviews (Chroma locally, pgvector in production) plus BM25  
 4. **Search** with location-aware hybrid retrieval + an OpenAI answer based only on retrieved cafes  
 
-Same Express app on one production host:
+Same Express app, three environments (separate data for sandbox vs production):
 
-| Surface | Local | Production |
-|---------|-------|------------|
-| Public search | http://localhost:3847/ | https://mark-d.dev/ |
-| Admin | http://localhost:3847/admin | https://mark-d.dev/admin |
+| Surface | Local | Sandbox | Production |
+|---------|-------|---------|------------|
+| Public search | http://localhost:3847/ | https://mark-d.dev/ | https://topcafes.fyi/ |
+| Admin | http://localhost:3847/admin | https://mark-d.dev/admin | https://topcafes.fyi/admin |
 
 One Node/Express process serves both. Production public is Express `GET /` (`index.html` at the project root). Production admin is Express serving `public/index.html` at `/admin`.
 
@@ -22,8 +22,8 @@ One Node/Express process serves both. Production public is Express `GET /` (`ind
 
 ```
 Browser
-  ├─ public search   /            (local :3847 or https://mark-d.dev/)
-  └─ admin UI        /admin       (local :3847/admin or https://mark-d.dev/admin)
+  ├─ public search   /            (local :3847 · sandbox mark-d.dev · prod topcafes.fyi)
+  └─ admin UI        /admin       (same hosts + /admin)
          │
          ▼
    Express (src/server.js)     port 3847   one process
@@ -32,14 +32,15 @@ Browser
          ├─ supabase           Postgres + pgvector            (production)
          ├─ Google Places      collect cafes
          ├─ Parallel Extract   coffee_content from websites
-         └─ Python RAG CLI     python3 -m rag …
-                └─ BM25        in memory / data/bm25_index.pkl
+         └─ Python RAG worker  python3 -m rag worker (kept warm by Node)
+                └─ BM25        in-memory, rebuilt from Chroma / pgvector
 ```
 
-- **Node / Express** — HTTP API, admin jobs, cafe store  
+- **Node / Express** — HTTP API, admin jobs, cafe store; one persistent RAG worker process  
 - **Python (`rag/`)** — indexing, hybrid search, location filter, LLM answer formatting  
 - **Local** — `STORAGE_BACKEND=sqlite+chroma` (`data/cafes.db` + Chroma)  
-- **Production** — `STORAGE_BACKEND=supabase` (Postgres + pgvector on the droplet). SQLite is not the prod system of record.
+- **Production** — `STORAGE_BACKEND=supabase` (Postgres + pgvector on the droplet, `/opt/barcelona-cafes-pg`). SQLite is not the prod system of record.  
+- **Sandbox** — same image as production, own Postgres (`/opt/barcelona-cafes-sandbox-pg`). Does not share cafe rows with production. One Supabase Auth project can serve all three admin URLs.
 
 ## Requirements
 
@@ -96,19 +97,38 @@ npm run rag:status
 
 ## Production (Docker on DigitalOcean)
 
-Docker + Caddy on the droplet. Public: `https://mark-d.dev` · Admin: `https://mark-d.dev/admin` (`DOMAIN`).
+One droplet, two isolated compose stacks, one Caddy:
 
-Admin is **magic-link** (Supabase Auth + `ADMIN_EMAILS`). `ADMIN_PASSWORD` Basic auth is a legacy fallback when Supabase Auth env is incomplete.
+| Env | Public / admin | App dir | Postgres |
+|-----|----------------|---------|----------|
+| Production | https://topcafes.fyi/ and `/admin` | `/opt/barcelona-cafes` | `/opt/barcelona-cafes-pg` (636 cafes — do not wipe) |
+| Sandbox | https://mark-d.dev/ and `/admin` | `/opt/barcelona-cafes-sandbox` | `/opt/barcelona-cafes-sandbox-pg` |
+| Local | http://localhost:3847/ | laptop | sqlite (default) or local pgvector |
 
-Production must use `STORAGE_BACKEND=supabase` and `SYNC_DATA=0`. The sync script defaults to `SYNC_DATA=1`; leaving that on can copy an empty local `data/` over the volume.
+Admin is **magic-link** (Supabase Auth + `ADMIN_EMAILS`). There is no `admin.*` subdomain. `ADMIN_PASSWORD` Basic auth is a legacy fallback when Supabase Auth env is incomplete.
 
-See [docs/production-runbook.md](docs/production-runbook.md) and [deploy/README.md](deploy/README.md) (Postgres overlay, `db:5432`).
+**DNS (Cloudflare, DNS only / grey cloud until certificates exist):**
+
+- `topcafes.fyi` A `@` → `164.90.200.60`
+- `mark-d.dev` A `@` → `164.90.200.60` (already)
+
+Until the production A record exists, keep `DOMAIN=topcafes.fyi,mark-d.dev` and **leave `SANDBOX_DOMAIN` empty** so `mark-d.dev` still serves production. After DNS works: `DOMAIN=topcafes.fyi`, `SANDBOX_DOMAIN=mark-d.dev`, then `deploy/cutover-sandbox-caddy.sh`.
+
+**Supabase Auth → URL configuration** (dashboard; cannot be set via API here):
+
+- Site URL: `https://topcafes.fyi/admin` (once DNS works; until then `https://mark-d.dev/admin` is fine)
+- Redirect URLs: `https://topcafes.fyi/admin`, `https://mark-d.dev/admin`, `http://localhost:3847/admin`
+
+Deploy from **`main`** (it now holds the production stack). Always `SYNC_DATA=0` unless you intend to overwrite the sqlite volume.
 
 ```bash
-# .env: STORAGE_BACKEND=supabase, DATABASE_URL=@db:5432, DOMAIN, ADMIN_DOMAIN, ADMIN_EMAILS, …
+# .env: STORAGE_BACKEND=supabase, DATABASE_URL=@db:5432, ADMIN_EMAILS, …
 ./deploy/remote-setup.sh
-SYNC_DATA=0 ./deploy/sync-and-up.sh
+SYNC_DATA=0 TARGET=prod ./deploy/sync-and-up.sh
+SYNC_DATA=0 TARGET=sandbox ./deploy/sync-and-up.sh
 ```
+
+See [docs/production-runbook.md](docs/production-runbook.md) and [deploy/README.md](deploy/README.md).
 
 ## Typical workflow
 
@@ -179,7 +199,8 @@ Public `POST /api/rag/search` is rate-limited (per client and globally). Answers
 |------|----------|
 | `data/cafes.db` | Cafes, reviews, `coffee_content` (local SQLite only) |
 | `data/chroma/` | Vector index (local Chroma) |
-| `data/bm25_index.pkl` | BM25 index |
+
+BM25 is built in memory from the vector store when the RAG worker starts or after a rebuild. Older `data/bm25_index.pkl` files are unused leftovers.
 
 These paths are gitignored. API keys live in `.env` only — they are not stored in the database.
 
@@ -195,21 +216,25 @@ These paths are gitignored. API keys live in `.env` only — they are not stored
 ```
 ├── index.html           Public search UI
 ├── public/              Admin UI assets
+├── shared/              Neighborhood gazetteer (Node + Python)
 ├── src/
 │   ├── server.js        Express app & API routes
 │   ├── config.js        API keys from environment (.env)
-│   ├── db.js            SQLite schema & helpers
+│   ├── db.js            CafeRepository facade
+│   ├── storage/         SQLite + Postgres adapters
 │   ├── places.js        Google Places collection
 │   ├── extract.js       Parallel Extract client
 │   ├── neighborhoods.js Viewport definitions
 │   ├── queries.js       Places text-search queries
-│   └── ragBridge.js     Node → Python RAG bridge
+│   └── ragBridge.js     Persistent Python RAG worker
 ├── rag/
+│   ├── worker.py        Long-lived JSON-lines worker
 │   ├── documents.py     Build index documents
-│   ├── index.py         Rebuild Chroma + BM25
-│   ├── location.py      Location detect + geocode + radius filter
+│   ├── index.py         Rebuild Chroma / pgvector + BM25
+│   ├── location.py      Gazetteer + geocode + radius filter
 │   ├── search.py        Hybrid search + answer assembly
-│   └── __main__.py      CLI: status | index | search
+│   └── __main__.py      CLI: status | index | search | worker
+├── deploy/              Caddy, sync, sandbox/prod compose helpers
 ├── data/                Local DB & indexes
 ├── package.json
 └── requirements.txt

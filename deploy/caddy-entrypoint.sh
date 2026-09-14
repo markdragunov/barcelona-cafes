@@ -1,8 +1,23 @@
 #!/bin/sh
-# Generate Caddyfile from DOMAIN / ADMIN_DOMAIN, then run Caddy.
+# Generate Caddyfile from DOMAIN / SANDBOX_DOMAIN / ADMIN_DOMAIN, then run Caddy.
+# DOMAIN hosts → production app (compose service "app").
+# SANDBOX_DOMAIN hosts → SANDBOX_UPSTREAM (default sandbox-app:3847).
+# Admin UI is always /admin on those hosts. ADMIN_DOMAIN is optional extra hostname.
 set -eu
 
-if [ -z "${DOMAIN:-}" ]; then
+emit_site() {
+  host="$1"
+  upstream="$2"
+  cat <<EOF
+${host} {
+	encode gzip
+	reverse_proxy ${upstream}
+}
+
+EOF
+}
+
+if [ -z "${DOMAIN:-}" ] && [ -z "${SANDBOX_DOMAIN:-}" ]; then
   cat > /etc/caddy/Caddyfile <<'EOF'
 :80 {
 	encode gzip
@@ -13,26 +28,33 @@ EOF
   exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
 fi
 
-ADMIN_HOST="${ADMIN_DOMAIN:-}"
-if [ -z "$ADMIN_HOST" ]; then
-  ADMIN_HOST="admin.${DOMAIN}"
-fi
+SANDBOX_UPSTREAM="${SANDBOX_UPSTREAM:-sandbox-app:3847}"
 
-# Main site + admin subdomain (same app; admin UI remains under /admin).
-# On the admin host, "/" redirects to "/admin" for convenience.
-cat > /etc/caddy/Caddyfile <<EOF
-${DOMAIN} {
-	encode gzip
-	reverse_proxy app:3847
-}
+{
+  if [ -n "${DOMAIN:-}" ]; then
+    for host in $(printf '%s' "$DOMAIN" | tr ', ' '\n' | sed '/^$/d'); do
+      emit_site "$host" "app:3847"
+    done
+  fi
 
-${ADMIN_HOST} {
+  if [ -n "${SANDBOX_DOMAIN:-}" ]; then
+    for host in $(printf '%s' "$SANDBOX_DOMAIN" | tr ', ' '\n' | sed '/^$/d'); do
+      emit_site "$host" "$SANDBOX_UPSTREAM"
+    done
+  fi
+
+  if [ -n "${ADMIN_DOMAIN:-}" ]; then
+    cat <<EOF
+${ADMIN_DOMAIN} {
 	encode gzip
 	@root path /
 	redir @root /admin 302
 	reverse_proxy app:3847
 }
-EOF
 
-echo "Caddy TLS sites: DOMAIN=${DOMAIN} ADMIN_DOMAIN=${ADMIN_HOST}"
+EOF
+  fi
+} > /etc/caddy/Caddyfile
+
+echo "Caddy TLS: DOMAIN=${DOMAIN:-} SANDBOX_DOMAIN=${SANDBOX_DOMAIN:-} ADMIN_DOMAIN=${ADMIN_DOMAIN:-}"
 exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile

@@ -39,6 +39,8 @@ services:
       - "443:443/udp"
     environment:
       DOMAIN: ${DOMAIN:-}
+      SANDBOX_DOMAIN: ${SANDBOX_DOMAIN:-}
+      SANDBOX_UPSTREAM: ${SANDBOX_UPSTREAM:-sandbox-app:3847}
       ADMIN_DOMAIN: ${ADMIN_DOMAIN:-}
     volumes:
       - ./deploy/caddy-entrypoint.sh:/entrypoint.sh:ro

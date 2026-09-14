@@ -72,11 +72,17 @@ Both paths also require `aud=authenticated` and `iss=${SUPABASE_URL}/auth/v1`,
 so a token minted by another Supabase project is rejected.
 
 ### Dashboard (once)
-1. Auth → URL configuration — add redirect URLs:
-   - `https://mark-d.dev/admin`
-   - `https://admin.mark-d.dev/admin`
-   - `http://localhost:3847/admin`
+1. Auth → URL configuration
+   - **Site URL:** `https://topcafes.fyi/admin` once that hostname resolves; until then `https://mark-d.dev/admin`
+   - **Redirect URLs** (all three):
+     - `https://topcafes.fyi/admin`
+     - `https://mark-d.dev/admin`
+     - `http://localhost:3847/admin`
 2. Auth → Providers → Email enabled (magic link)
+
+Do not add `https://admin.mark-d.dev` unless you deliberately set `ADMIN_DOMAIN`.
+
+Cafe data is **not** in this Supabase project’s database — production and sandbox each have their own droplet Postgres. Auth (magic links + `ADMIN_EMAILS`) is shared.
 
 ### Invite an admin
 ```bash
@@ -85,6 +91,6 @@ npm run admin:invite -- you@example.com
 # also set ADMIN_EMAILS=you@example.com
 ```
 
-Then open `https://admin.mark-d.dev/`, enter the email, and open the magic link.
+Then open `https://mark-d.dev/admin` or `https://topcafes.fyi/admin`, enter the email, and open the magic link.
 
 When Supabase Auth env is complete, legacy `ADMIN_PASSWORD` Basic auth is ignored.

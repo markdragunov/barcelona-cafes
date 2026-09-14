@@ -13,7 +13,7 @@ from .bm25_cache import get_cache
 from .index import indexes_ready
 from .location import resolve_location_filter
 from .paths import CHAT_MODEL, EMBEDDING_MODEL
-from .stores.factory import get_index_store
+from .stores.factory import get_index_store, get_repository
 
 REASONING_PROMPT = """You help recommend Barcelona coffee shops.
 Use ONLY the provided cafe data. No outside knowledge.
@@ -259,6 +259,29 @@ def answer_with_llm(
     return recommend_cafes(client, query, cafes)["answer"]
 
 
+def _hydrate_coordinates(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Fill missing lat/lng from the cafe table so old indexes still map."""
+    if not results or all(
+        row.get("latitude") is not None and row.get("longitude") is not None
+        for row in results
+    ):
+        return results
+    try:
+        rows = get_repository().list_cafe_coordinates()
+    except Exception:
+        return results
+    by_id = {row["place_id"]: row for row in rows}
+    for row in results:
+        extra = by_id.get(row.get("place_id"))
+        if not extra:
+            continue
+        if row.get("latitude") is None:
+            row["latitude"] = extra.get("latitude")
+        if row.get("longitude") is None:
+            row["longitude"] = extra.get("longitude")
+    return results
+
+
 def hybrid_search_and_answer(
     openai_api_key: str,
     query: str,
@@ -353,6 +376,8 @@ def hybrid_search_and_answer(
             "notice": location_info.get("notice"),
         },
     }
+
+    payload["results"] = _hydrate_coordinates(payload["results"])
 
     # Server-side only: Node logs this and never forwards it to the client.
     if location_info.get("error"):

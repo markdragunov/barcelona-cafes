@@ -98,7 +98,6 @@
         color: var(--accent); padding: 0 1px; cursor: pointer; border-bottom: 2px solid rgba(168,71,30,.4);
       }
       .answer .place:hover { background: #f3ebe5; }
-      .caret { display: inline-block; width: 9px; height: 18px; background: var(--ink); transform: translateY(2px); margin-left: 3px; animation: blink .85s steps(1, end) infinite; }
 
       .notice { margin: 16px 0 0; font-size: 14.5px; line-height: 1.6; color: var(--muted); max-width: 52ch; border-left: 2px solid #d7d2c4; padding-left: 12px; }
 
@@ -155,7 +154,6 @@
       @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
       @keyframes rise { from { opacity: 0; transform: translateY(5px) } to { opacity: 1; transform: none } }
       @keyframes dim { 0%, 100% { opacity: .5 } 50% { opacity: .18 } }
-      @keyframes blink { 0%, 100% { opacity: 1 } 50% { opacity: 0 } }
     </style>
   </head>
   <body>
@@ -232,7 +230,6 @@
         query: "",
         topN: 5,
         canShowMore: false,
-        stream: null,
         abort: null,
         leaflet: null,
       };
@@ -479,24 +476,13 @@
         return parts;
       }
 
-      function renderAnswer(parts, upTo) {
+      function renderAnswer(parts) {
         const p = $("answer");
         p.innerHTML = "";
-        let budget = upTo === undefined ? Infinity : upTo;
         parts.forEach((part) => {
-          if (budget <= 0) return;
           if (typeof part === "string") {
-            const words = part.split(/(\s+)/);
-            const take = [];
-            for (const w of words) {
-              if (!w) continue;
-              if (budget <= 0) break;
-              take.push(w);
-              if (w.trim()) budget -= 1;
-            }
-            p.appendChild(document.createTextNode(take.join("")));
+            p.appendChild(document.createTextNode(part));
           } else {
-            budget -= 1;
             const b = document.createElement("button");
             b.type = "button";
             b.className = "place";
@@ -505,30 +491,7 @@
             p.appendChild(b);
           }
         });
-        if (upTo !== undefined) {
-          p.appendChild(Object.assign(document.createElement("span"), { className: "caret" }));
-        }
         p.hidden = false;
-      }
-
-      function stream(parts) {
-        if (state.stream) clearInterval(state.stream);
-        const total = parts.reduce(
-          (n, p) => n + (typeof p === "string" ? p.split(/\s+/).filter(Boolean).length : 1),
-          0
-        );
-        let i = 0;
-        renderAnswer(parts, 0);
-        state.stream = setInterval(() => {
-          i += 1;
-          if (i >= total) {
-            clearInterval(state.stream);
-            state.stream = null;
-            renderAnswer(parts);
-          } else {
-            renderAnswer(parts, i);
-          }
-        }, 36);
       }
 
       function renderRows() {
@@ -709,7 +672,6 @@
 
       function resetView() {
         if (state.abort) state.abort.abort();
-        if (state.stream) clearInterval(state.stream);
         state.cards = [];
         state.openId = null;
         state.canShowMore = false;
@@ -729,7 +691,6 @@
         state.query = q;
         state.topN = topN;
         if (state.abort) state.abort.abort();
-        if (state.stream) clearInterval(state.stream);
         history.replaceState(null, "", `${location.pathname}${location.search}#q=${encodeURIComponent(q)}`);
         $("clear-btn").hidden = false;
         $("search-btn").disabled = true;
@@ -778,7 +739,7 @@
             return;
           }
 
-          stream(answerParts(parsed.intro, parsed.cafes));
+          renderAnswer(answerParts(parsed.intro, parsed.cafes));
           renderRows();
         } catch (err) {
           if (err.name === "AbortError") {

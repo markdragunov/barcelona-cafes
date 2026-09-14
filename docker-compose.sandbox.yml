@@ -1,0 +1,46 @@
+# Isolated sandbox app. Service name is sandbox-app so it does not steal
+# Docker DNS "app" on the production Caddy network.
+#
+#   docker compose -p barcelona-cafes-sandbox -f docker-compose.sandbox.yml up -d
+services:
+  sandbox-app:
+    build: .
+    container_name: barcelona-cafes-sandbox-app-1
+    restart: always
+    env_file:
+      - .env
+    environment:
+      PORT: "3847"
+      DATA_DIR: /data
+      PYTHON_BIN: /app/.venv/bin/python
+    volumes:
+      - cafes-data:/data
+    expose:
+      - "3847"
+    networks:
+      internal:
+      edge:
+        aliases:
+          - sandbox-app
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3847/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  cafes-data:
+
+networks:
+  internal:
+    name: barcelona-cafes-sandbox_internal
+  edge:
+    external: true
+    name: barcelona-cafes_internal

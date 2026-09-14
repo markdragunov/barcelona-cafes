@@ -8,6 +8,7 @@
 *.db-*
 *.sqlite3
 data/chroma/
+# leftover pickle files from older BM25-on-disk builds
 data/bm25_index.pkl
 
 # Python

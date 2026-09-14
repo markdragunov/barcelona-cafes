@@ -23,6 +23,7 @@ COPY index.html ./
 COPY public ./public
 COPY src ./src
 COPY rag ./rag
+COPY shared ./shared
 
 ENV NODE_ENV=production \
     PORT=3847 \

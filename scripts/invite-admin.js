@@ -36,7 +36,7 @@ if (!url || !serviceKey) {
 
 const redirectTo =
   String(process.env.ADMIN_INVITE_REDIRECT || "").trim() ||
-  "https://admin.mark-d.dev/admin";
+  "https://topcafes.fyi/admin";
 
 const supabase = createClient(url, serviceKey, {
   auth: { autoRefreshToken: false, persistSession: false },
@@ -79,6 +79,7 @@ console.log("Next steps:");
 console.log(`  1. Ensure ADMIN_EMAILS includes ${email}`);
 console.log("  2. In Supabase Auth → URL config, allow redirect:");
 console.log(`       ${redirectTo}`);
+console.log("       https://topcafes.fyi/admin");
 console.log("       https://mark-d.dev/admin");
 console.log("       http://localhost:3847/admin");
 console.log("  3. Open the admin site and complete the magic link (or use the invite email).");

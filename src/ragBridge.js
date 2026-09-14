@@ -252,8 +252,7 @@ function usePersistentWorker() {
 }
 
 /**
- * Run `python3 -m rag <args…>` and parse JSON.
- * Search/status reuse a warm worker process unless RAG_WORKER=0.
+ * Run a RAG command through the warm Python worker (or one-shot spawn if RAG_WORKER=0).
  */
 export function runRag(
   args,
