@@ -63,6 +63,28 @@ async function runRepositoryContract(repo) {
   const coords = await repo.listCafeCoordinates();
   assert.equal(coords.length, 1);
   assert.equal(coords[0].place_id, "test_place_1");
+
+  const known = await repo.listKnownPlaceIds();
+  assert.deepEqual(known, ["test_place_1"]);
+
+  const second = {
+    ...sampleCafe,
+    place_id: "test_place_2",
+    name: "Second Cafe",
+  };
+  await repo.upsertCafeWithReviews(second, [
+    { ...sampleReviews[0], place_id: "test_place_2", author_name: "Bea" },
+  ]);
+  const exportedTwo = await repo.getCafesForExport("all-barcelona");
+  assert.equal(exportedTwo.length, 2);
+  assert.equal(
+    exportedTwo.find((row) => row.place_id === "test_place_1").reviews.length,
+    1
+  );
+  assert.equal(
+    exportedTwo.find((row) => row.place_id === "test_place_2").reviews.length,
+    1
+  );
 }
 
 describe("SqliteCafeRepository contract", () => {

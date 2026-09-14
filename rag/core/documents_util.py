@@ -70,6 +70,34 @@ def content_hash(coffee_raw: str | None, reviews_text: str) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def cafe_metadata(cafe: dict[str, Any]) -> dict[str, Any]:
+    """Index/search metadata. Chroma rejects None, so omit missing coords."""
+    meta: dict[str, Any] = {
+        "place_id": cafe["place_id"],
+        "name": cafe.get("name") or "Unknown",
+        "address": cafe.get("address") or "",
+        "rating": cafe.get("rating") if cafe.get("rating") is not None else 0.0,
+        "district": cafe.get("district") or "",
+        "website": cafe.get("website") or "",
+    }
+    lat = _optional_float(cafe.get("latitude"))
+    lng = _optional_float(cafe.get("longitude"))
+    if lat is not None:
+        meta["latitude"] = lat
+    if lng is not None:
+        meta["longitude"] = lng
+    return meta
+
+
 def assemble_documents(
     cafes: list[dict[str, Any]],
     reviews_by_place: dict[str, list[dict[str, Any]]],
@@ -83,6 +111,8 @@ def assemble_documents(
             "rating": float(row["rating"]) if row.get("rating") is not None else 0.0,
             "website": row.get("website") or "",
             "district": row.get("neighborhood_name") or row.get("district") or "",
+            "latitude": _optional_float(row.get("latitude")),
+            "longitude": _optional_float(row.get("longitude")),
         }
         coffee = coffee_text(row.get("coffee_content"))
         rtext = reviews_block(reviews_by_place.get(cafe["place_id"], []))
@@ -94,14 +124,7 @@ def assemble_documents(
                 "place_id": cafe["place_id"],
                 "document": document,
                 "content_hash": content_hash(row.get("coffee_content"), rtext),
-                "metadata": {
-                    "place_id": cafe["place_id"],
-                    "name": cafe["name"],
-                    "address": cafe["address"],
-                    "rating": cafe["rating"],
-                    "district": cafe["district"],
-                    "website": cafe["website"],
-                },
+                "metadata": cafe_metadata(cafe),
             }
         )
     return documents

@@ -80,7 +80,7 @@ class ResolveLocationFilterTests(unittest.TestCase):
             location_mod, "cafes_within_radius", return_value=["pid1", "pid2"]
         ):
             result = location_mod.resolve_location_filter(
-                object(), "test-key", "coffee somewhere"
+                "test-key", "coffee somewhere"
             )
         return result, geocode_mock
 
@@ -155,7 +155,11 @@ class DegradedSearchTests(unittest.TestCase):
             ), \
             mock.patch.object(search_mod, "_vector_search", return_value=[]) as vector_mock, \
             mock.patch.object(search_mod, "_bm25_search", return_value=[]) as bm25_mock, \
-            mock.patch.object(search_mod, "answer_with_llm", return_value="An answer."):
+            mock.patch.object(search_mod, "recommend_cafes", return_value={
+                "answer": "An answer.",
+                "intro": "An answer.",
+                "reasons_by_id": {},
+            }):
             result = search_mod.hybrid_search_and_answer(
                 "sk-test", "specialty coffee on Carrer de Pau Claris"
             )
@@ -171,6 +175,34 @@ class DegradedSearchTests(unittest.TestCase):
         # Upstream detail is available server-side but never inside `location`.
         self.assertIn("164.90.200.60", result["location_error"])
         self.assertNotIn("164.90.200.60", json.dumps(result["location"]))
+
+
+class DeterministicLocationExtractionTests(unittest.TestCase):
+    def test_neighborhood_in_query_does_not_need_llm(self) -> None:
+        from rag.location import extract_location
+
+        detected = extract_location("quiet place to work in Gràcia")
+        self.assertEqual(detected["location"], "Gràcia")
+        self.assertEqual(detected["location_type"], "neighborhood")
+
+    def test_chinese_alias_in_example_query(self) -> None:
+        from rag.location import extract_location
+
+        detected = extract_location("哥特区哪里能喝到手冲")
+        self.assertEqual(detected["location"], "Gothic Quarter")
+
+    def test_prepositional_landmark_is_extracted_without_llm(self) -> None:
+        from rag.location import extract_location
+
+        detected = extract_location("specialty coffee near Sagrada Familia")
+        self.assertEqual(detected["location"], "Sagrada Familia")
+        self.assertEqual(detected["location_type"], "area")
+
+    def test_city_only_and_unlocated_queries_are_ignored(self) -> None:
+        from rag.location import extract_location
+
+        self.assertIsNone(extract_location("best espresso in Barcelona"))
+        self.assertIsNone(extract_location("specialty coffee"))
 
 
 if __name__ == "__main__":

@@ -39,3 +39,7 @@ export async function getCafeCount() {
 export async function listCafeCoordinates() {
   return repo().listCafeCoordinates();
 }
+
+export async function listKnownPlaceIds() {
+  return repo().listKnownPlaceIds();
+}

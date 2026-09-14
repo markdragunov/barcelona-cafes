@@ -10,6 +10,7 @@
  * @property {(placeId: string, coffeeContent: string) => Promise<void>} updateCoffeeContent
  * @property {() => Promise<number>} getCafeCount
  * @property {() => Promise<{place_id: string, latitude: number, longitude: number}[]>} listCafeCoordinates
+ * @property {() => Promise<string[]>} listKnownPlaceIds
  */
 
 /**

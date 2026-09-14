@@ -31,7 +31,7 @@
     {
       "id": "gracia",
       "name": "Gràcia",
-      "aliases": ["Vila de Gràcia"],
+      "aliases": ["Vila de Gràcia", "Грасия", "Грасии"],
       "viewport": {
         "low": { "latitude": 41.4, "longitude": 2.145 },
         "high": { "latitude": 41.415, "longitude": 2.165 }
@@ -40,7 +40,7 @@
     {
       "id": "gothic-quarter",
       "name": "Gothic Quarter",
-      "aliases": ["Barri Gòtic", "Barrio Gótico", "Gothic"],
+      "aliases": ["Barri Gòtic", "Barrio Gótico", "Gothic", "哥特区", "哥德区"],
       "viewport": {
         "low": { "latitude": 41.379, "longitude": 2.173 },
         "high": { "latitude": 41.3855, "longitude": 2.181 }

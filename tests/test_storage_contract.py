@@ -110,6 +110,8 @@ class SqliteRepositoryContract(unittest.TestCase):
         self.assertEqual(docs[0]["place_id"], "pid1")
         self.assertIn("Cafe Uno", docs[0]["document"])
         self.assertTrue(docs[0]["content_hash"])
+        self.assertEqual(docs[0]["metadata"]["latitude"], 41.4)
+        self.assertEqual(docs[0]["metadata"]["longitude"], 2.17)
 
         coords = self.repo.list_cafe_coordinates()
         self.assertEqual(len(coords), 1)
@@ -173,6 +175,39 @@ class ChromaIndexStoreContract(unittest.TestCase):
         self.assertEqual(hits[0]["place_id"], "p1")
         bm25_rows = store.iter_documents_for_bm25()
         self.assertEqual(len(bm25_rows), 1)
+
+    def test_failed_rebuild_keeps_previous_index(self) -> None:
+        try:
+            import chromadb  # noqa: F401
+        except ImportError:
+            self.skipTest("chromadb not installed")
+
+        from rag.stores.chroma_index import ChromaIndexStore
+
+        store = ChromaIndexStore()
+        fake_emb = [0.2] * 8
+        docs = [
+            {
+                "place_id": "keep-me",
+                "document": "keep this cafe",
+                "content_hash": "h-keep",
+                "metadata": {"place_id": "keep-me", "name": "Keep", "address": "", "rating": 4.0, "district": "", "website": ""},
+            }
+        ]
+        with mock.patch("rag.stores.chroma_index.embed_batch", return_value=[fake_emb]):
+            store.rebuild("sk-test", docs)
+        self.assertTrue(store.is_ready())
+
+        with mock.patch(
+            "rag.stores.chroma_index.embed_batch",
+            side_effect=RuntimeError("openai down"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "openai down"):
+                store.rebuild("sk-test", docs)
+
+        self.assertTrue(store.is_ready())
+        hits = store.vector_search(fake_emb, top_n=1)
+        self.assertEqual(hits[0]["place_id"], "keep-me")
 
 
 class PgvectorOptionalContract(unittest.TestCase):

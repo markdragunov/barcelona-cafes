@@ -1,5 +1,5 @@
 import { SEARCH_QUERIES } from "./queries.js";
-import { upsertCafeWithReviews } from "./db.js";
+import { upsertCafeWithReviews, listKnownPlaceIds } from "./db.js";
 
 const TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText";
 const PLACE_DETAILS_URL = "https://places.googleapis.com/v1/places";
@@ -66,6 +66,24 @@ function mapCafe(place, neighborhood) {
     neighborhood_id: neighborhood.id,
     neighborhood_name: neighborhood.name,
   };
+}
+
+export function searchResultHasCoordinates(place) {
+  const lat = Number(place?.location?.latitude);
+  const lng = Number(place?.location?.longitude);
+  return Number.isFinite(lat) && Number.isFinite(lng);
+}
+
+/**
+ * Details is only needed when Text Search did not already return coordinates
+ * and the place is not already in the local database.
+ */
+export function shouldFetchPlaceDetails(place, knownPlaceIds = new Set()) {
+  const placeId = normalizePlaceId(place?.id);
+  if (!placeId) return false;
+  if (knownPlaceIds.has(placeId)) return false;
+  if (searchResultHasCoordinates(place)) return false;
+  return true;
 }
 
 async function sleep(ms) {
@@ -150,12 +168,20 @@ async function fetchPlaceDetails(apiKey, placeId) {
   });
 }
 
-async function collectForQuery(apiKey, textQuery, neighborhood, onProgress) {
+async function collectForQuery(
+  apiKey,
+  textQuery,
+  neighborhood,
+  onProgress,
+  seenPlaceIds,
+  knownPlaceIds
+) {
   let pageToken = null;
   let pages = 0;
   let found = 0;
   let saved = 0;
-  const seenThisQuery = new Set();
+  let skippedDuplicate = 0;
+  let detailsCalls = 0;
 
   do {
     const data = await searchTextPage(
@@ -172,23 +198,29 @@ async function collectForQuery(apiKey, textQuery, neighborhood, onProgress) {
       if (!hasCafeType(place.types)) continue;
 
       const placeId = normalizePlaceId(place.id);
-      if (!placeId || seenThisQuery.has(placeId)) continue;
-      seenThisQuery.add(placeId);
+      if (!placeId) continue;
+      if (seenPlaceIds.has(placeId)) {
+        skippedDuplicate += 1;
+        continue;
+      }
+      seenPlaceIds.add(placeId);
 
-      // Prefer details for full review set and freshest fields.
       let enriched = place;
-      try {
-        enriched = await fetchPlaceDetails(apiKey, placeId);
-        if (!hasCafeType(enriched.types)) continue;
-        await sleep(50);
-      } catch {
-        // Fall back to search result if details fail.
-        enriched = place;
+      if (shouldFetchPlaceDetails(place, knownPlaceIds)) {
+        try {
+          enriched = await fetchPlaceDetails(apiKey, placeId);
+          detailsCalls += 1;
+          if (!hasCafeType(enriched.types)) continue;
+          await sleep(50);
+        } catch {
+          enriched = place;
+        }
       }
 
       const cafe = mapCafe(enriched, neighborhood);
       const reviews = mapReviews(cafe.place_id, enriched.reviews);
       await upsertCafeWithReviews(cafe, reviews);
+      knownPlaceIds.add(placeId);
       saved += 1;
     }
 
@@ -202,10 +234,12 @@ async function collectForQuery(apiKey, textQuery, neighborhood, onProgress) {
       pages,
       found,
       saved,
+      skippedDuplicate,
+      detailsCalls,
     });
   } while (pageToken);
 
-  return { found, saved, pages };
+  return { found, saved, pages, skippedDuplicate, detailsCalls };
 }
 
 /**
@@ -225,7 +259,12 @@ export async function collectCafes({
     found: 0,
     saved: 0,
     skippedNonCafe: 0,
+    skippedDuplicate: 0,
+    detailsCalls: 0,
   };
+
+  const seenPlaceIds = new Set();
+  const knownPlaceIds = new Set(await listKnownPlaceIds());
 
   for (const neighborhood of neighborhoods) {
     if (signal?.aborted) throw new Error("Collection cancelled");
@@ -253,11 +292,15 @@ export async function collectCafes({
         apiKey,
         query,
         neighborhood,
-        onProgress
+        onProgress,
+        seenPlaceIds,
+        knownPlaceIds
       );
       totals.found += result.found;
       totals.saved += result.saved;
-      totals.apiCallsEstimate += result.pages;
+      totals.skippedDuplicate += result.skippedDuplicate;
+      totals.detailsCalls += result.detailsCalls;
+      totals.apiCallsEstimate += result.pages + result.detailsCalls;
 
       await sleep(150);
     }

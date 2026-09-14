@@ -148,12 +148,26 @@ export function createSqliteRepository() {
            FROM cafes ${clause} ORDER BY name COLLATE NOCASE`
         )
         .all(...params);
-      const reviewStmt = db.prepare(
-        `SELECT author_name, rating, text, publish_time,
-                relative_publish_time_description, language_code
-         FROM reviews WHERE place_id = ? ORDER BY publish_time DESC`
-      );
-      return cafes.map((cafe) => ({ ...cafe, reviews: reviewStmt.all(cafe.place_id) }));
+      if (cafes.length === 0) return [];
+      const placeholders = cafes.map(() => "?").join(",");
+      const reviews = db
+        .prepare(
+          `SELECT place_id, author_name, rating, text, publish_time,
+                  relative_publish_time_description, language_code
+           FROM reviews WHERE place_id IN (${placeholders})
+           ORDER BY publish_time DESC`
+        )
+        .all(...cafes.map((cafe) => cafe.place_id));
+      const byPlace = new Map();
+      for (const review of reviews) {
+        const { place_id: placeId, ...rest } = review;
+        if (!byPlace.has(placeId)) byPlace.set(placeId, []);
+        byPlace.get(placeId).push(rest);
+      }
+      return cafes.map((cafe) => ({
+        ...cafe,
+        reviews: byPlace.get(cafe.place_id) || [],
+      }));
     },
 
     async getCafesNeedingCoffeeContent(neighborhoodId) {
@@ -210,6 +224,10 @@ export function createSqliteRepository() {
            WHERE latitude IS NOT NULL AND longitude IS NOT NULL`
         )
         .all();
+    },
+
+    async listKnownPlaceIds() {
+      return db.prepare("SELECT place_id FROM cafes").all().map((row) => row.place_id);
     },
   };
 }

@@ -126,17 +126,16 @@ export function createPostgresRepository() {
          FROM cafes ${clause} ORDER BY lower(name)`,
         params
       );
-      const out = [];
-      for (const cafe of cafes) {
-        const { rows: reviews } = await pool.query(
-          `SELECT author_name, rating, text, publish_time,
-                  relative_publish_time_description, language_code
-           FROM reviews WHERE place_id = $1 ORDER BY publish_time DESC NULLS LAST`,
-          [cafe.place_id]
-        );
-        out.push({ ...cafe, reviews });
-      }
-      return out;
+      if (cafes.length === 0) return [];
+      const ids = cafes.map((cafe) => cafe.place_id);
+      const { rows: reviews } = await pool.query(
+        `SELECT place_id, author_name, rating, text, publish_time,
+                relative_publish_time_description, language_code
+         FROM reviews WHERE place_id = ANY($1)
+         ORDER BY publish_time DESC NULLS LAST`,
+        [ids]
+      );
+      return attachReviews(cafes, reviews);
     },
 
     async getCafesNeedingCoffeeContent(neighborhoodId) {
@@ -196,5 +195,23 @@ export function createPostgresRepository() {
       );
       return rows;
     },
+
+    async listKnownPlaceIds() {
+      const { rows } = await pool.query(`SELECT place_id FROM cafes`);
+      return rows.map((row) => row.place_id);
+    },
   };
+}
+
+function attachReviews(cafes, reviews) {
+  const byPlace = new Map();
+  for (const review of reviews) {
+    const { place_id: placeId, ...rest } = review;
+    if (!byPlace.has(placeId)) byPlace.set(placeId, []);
+    byPlace.get(placeId).push(rest);
+  }
+  return cafes.map((cafe) => ({
+    ...cafe,
+    reviews: byPlace.get(cafe.place_id) || [],
+  }));
 }

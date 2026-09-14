@@ -3,384 +3,287 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Barcelona Coffee</title>
+    <title>Top Coffee</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Source+Sans+3:wght@400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Sans:wght@400;500&display=swap"
       rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
     />
     <style>
       :root {
-        --bg: #f5f0e8;
-        --ink: #1a1a1a;
-        --muted: #6b6560;
-        --line: #1a1a1a;
-        --card: #fffdf8;
-        --pill: #ebe4d8;
-        font-family: "Source Sans 3", sans-serif;
-        color: var(--ink);
-        background: var(--bg);
+        --bg: #fafaf7;
+        --ink: #14140f;
+        --muted: #5a5750;
+        --line: #e4e1d8;
+        --accent: #a8471e;
+        --surface: #f3f2eb;
       }
-
-      * {
-        box-sizing: border-box;
-      }
-
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; background: var(--bg); }
       body {
-        margin: 0;
-        min-height: 100vh;
-        background: var(--bg);
         color: var(--ink);
+        font-family: "IBM Plex Sans", system-ui, sans-serif;
+        font-size: 16px;
+        line-height: 1.6;
+        padding: 0 20px 90px;
       }
+      .page { max-width: 660px; margin: 0 auto; }
+      a { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(168,71,30,.35); }
+      a:hover { color: #7c3013; border-bottom-color: #7c3013; }
+      button { font-family: inherit; }
+      button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+      input:focus { outline: none; }
+      ::selection { background: #f0dfd4; }
+      .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+      [hidden] { display: none !important; }
 
-      .page {
-        width: min(720px, calc(100% - 2.5rem));
-        margin: 0 auto;
-        padding: 4.5rem 0 5rem;
-      }
+      .brand { display: flex; align-items: center; gap: 9px; padding: 26px 0 0; font-size: 13.5px; font-weight: 500; }
+      .logo { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--ink); flex: none; }
+      .logo i { display: block; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
 
-      .hero {
-        margin-bottom: 2.75rem;
-        animation: fade-up 0.8s ease both;
-      }
-
-      h1 {
-        margin: 0;
-        font-family: "Libre Baskerville", Georgia, serif;
+      .hero h1 {
+        font-family: "Source Serif 4", Georgia, serif;
         font-weight: 400;
-        font-size: clamp(2.1rem, 5vw, 3rem);
+        font-size: clamp(30px, 6.4vw, 40px);
         line-height: 1.15;
-        letter-spacing: -0.02em;
+        letter-spacing: -.015em;
+        margin: 40px 0 4px;
+        text-align: center;
+        text-wrap: balance;
       }
 
-      .lede {
-        margin: 0.9rem 0 0;
-        max-width: 28rem;
-        color: var(--muted);
-        font-size: 1.05rem;
-        line-height: 1.5;
+      .search { position: sticky; top: 0; z-index: 20; background: var(--bg); padding: 22px 0 0; }
+      .search-row { display: flex; gap: 10px; align-items: center; border-bottom: 2px solid var(--ink); padding-bottom: 9px; }
+      .search input {
+        flex: 1; min-width: 0; border: none; background: transparent;
+        font-family: inherit; font-size: 17px; color: var(--ink); padding: 10px 0;
       }
+      .search input::placeholder { color: #8b877c; }
+      .linkbtn { border: none; background: transparent; color: var(--muted); font-size: 14px; height: 44px; padding: 0 2px; cursor: pointer; }
+      .linkbtn:hover { color: var(--ink); }
+      #search-btn { border: none; background: transparent; font-size: 15px; font-weight: 500; height: 44px; padding: 0; cursor: pointer; }
+      #search-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-      .search {
-        animation: fade-up 0.8s ease 0.08s both;
-      }
+      .tokens { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 0 10px; }
+      .tokens .label { font-size: 12.5px; color: var(--muted); }
+      .token { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; background: #f1efe7; border: 1px solid var(--line); border-radius: 3px; padding: 5px 9px; }
+      .token .kind { color: var(--muted); }
+      .spacer { height: 14px; }
 
-      .search-row {
-        display: grid;
-        gap: 1.5rem;
-      }
-
-      label.sr-only {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        padding: 0;
-        margin: -1px;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        border: 0;
-      }
-
-      #query {
-        width: 100%;
-        border: 0;
-        border-bottom: 1px solid rgba(26, 26, 26, 0.28);
-        border-radius: 0;
-        background: transparent;
-        padding: 0.85rem 0;
-        font: inherit;
-        font-size: 1.2rem;
-        color: var(--ink);
-        outline: none;
-        transition: border-color 0.2s ease;
-      }
-
-      #query::placeholder {
-        color: #9a948c;
-      }
-
-      #query:focus {
-        border-bottom-color: var(--ink);
-      }
-
-      .controls {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-      }
-
-      .pills {
-        display: flex;
-        align-items: center;
-        gap: 0.45rem;
-      }
-
-      .pills span {
-        font-size: 0.85rem;
-        color: var(--muted);
-        margin-right: 0.35rem;
-      }
-
+      .pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
       .pill {
-        appearance: none;
-        border: 0;
-        background: transparent;
-        color: var(--muted);
-        font: inherit;
-        font-size: 0.92rem;
-        font-weight: 500;
-        padding: 0.4rem 0.85rem;
-        border-radius: 999px;
-        cursor: pointer;
-        transition: background 0.2s ease, color 0.2s ease;
+        display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px;
+        border: 1px solid var(--line); border-radius: 999px; background: #f4f3ec;
+        font-size: 14.5px; color: var(--ink); cursor: pointer;
       }
+      .pill:hover { border-color: var(--accent); color: var(--accent); }
+      .pill .intent { color: var(--muted); font-size: 12.5px; }
 
-      .pill[aria-pressed="true"] {
-        background: var(--ink);
-        color: var(--bg);
+      .statusrow { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; }
+      .status { font-size: 14px; color: var(--muted); margin: 0; }
+      .status.pulse { animation: dim 1.2s ease-in-out infinite; }
+      .underlined { border: none; background: transparent; color: var(--muted); font-size: 14px; height: 44px; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+      .underlined:hover { color: var(--ink); }
+
+      .answer { font-family: "Source Serif 4", Georgia, serif; font-size: 22px; line-height: 1.55; margin: 22px 0 0; max-width: 48ch; text-wrap: pretty; }
+      .answer .place {
+        border: none; background: transparent; font-family: inherit; font-size: inherit; line-height: inherit;
+        color: var(--accent); padding: 0 1px; cursor: pointer; border-bottom: 2px solid rgba(168,71,30,.4);
       }
+      .answer .place:hover { background: #f3ebe5; }
+      .caret { display: inline-block; width: 9px; height: 18px; background: var(--ink); transform: translateY(2px); margin-left: 3px; animation: blink .85s steps(1, end) infinite; }
 
-      .pill:hover:not([aria-pressed="true"]) {
-        background: var(--pill);
-        color: var(--ink);
+      .notice { margin: 16px 0 0; font-size: 14.5px; line-height: 1.6; color: var(--muted); max-width: 52ch; border-left: 2px solid #d7d2c4; padding-left: 12px; }
+
+      .map-wrap {
+        margin-top: 30px; border: 1px solid var(--line); background: #f2f1ea;
+        height: 220px; position: relative; overflow: hidden;
       }
-
-      #search-btn {
-        appearance: none;
-        border: 0;
-        background: var(--ink);
-        color: var(--bg);
-        font: inherit;
-        font-size: 0.95rem;
-        font-weight: 600;
-        letter-spacing: 0.02em;
-        padding: 0.75rem 1.4rem;
-        border-radius: 999px;
-        cursor: pointer;
-        transition: opacity 0.2s ease, transform 0.15s ease;
+      .map { height: 100%; width: 100%; }
+      .map .leaflet-container, .map-wrap .leaflet-container { height: 100%; width: 100%; background: #f2f1ea; font-family: inherit; }
+      .map-wrap .leaflet-div-icon { background: transparent; border: none; }
+      .map-wrap .caption { position: absolute; left: 10px; bottom: 8px; z-index: 500; font-size: 11.5px; color: var(--muted); background: rgba(250,250,247,.9); padding: 3px 6px; pointer-events: none; }
+      .pin { display: flex; flex-direction: column; align-items: center; gap: 2px; border: none; background: transparent; padding: 0; cursor: pointer; }
+      .pin span.dot {
+        display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%;
+        background: #3e3a31; color: var(--bg); border: 2px solid var(--bg); box-shadow: 0 1px 3px rgba(20,20,15,.3); font-size: 12.5px; font-weight: 500;
       }
+      .pin span.stick { width: 2px; height: 8px; background: #3e3a31; }
+      .pin.on span.dot, .pin.on span.stick { background: var(--accent); }
 
-      #search-btn:hover:not(:disabled) {
-        transform: translateY(-1px);
-      }
+      .resultshead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-top: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+      .resultshead button { height: 36px; font-size: 13px; }
 
-      #search-btn:disabled {
-        opacity: 0.45;
-        cursor: not-allowed;
-        transform: none;
-      }
+      .row { border-bottom: 1px solid var(--line); }
+      .row.on { background: var(--surface); }
+      .rowhead { width: 100%; display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; border: none; background: transparent; text-align: left; padding: 14px 8px; min-height: 56px; cursor: pointer; animation: rise 130ms ease-out both; }
+      .rowhead .left { display: flex; gap: 11px; align-items: flex-start; min-width: 0; }
+      .num { flex: none; display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: #3e3a31; color: var(--bg); font-size: 12px; margin-top: 3px; }
+      .row.on .num { background: var(--accent); }
+      .name { display: block; font-family: "Source Serif 4", Georgia, serif; font-size: 19px; line-height: 1.3; }
+      .meta1 { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
+      .meta1 .stars { color: #8a6510; }
+      .toggle { flex: none; font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+      .details { padding: 0 8px 18px 41px; animation: fade 120ms ease-out both; }
+      .details p { margin: 0; font-size: 15.5px; line-height: 1.65; color: #2f2c25; max-width: 52ch; text-wrap: pretty; }
+      .details .addr { margin-top: 8px; font-size: 13.5px; line-height: 1.7; color: var(--muted); }
+      .details .links { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 4px; }
+      .details .links a, .details .links span { font-size: 14px; display: inline-flex; align-items: center; min-height: 44px; }
+      .details .links span { color: var(--muted); }
 
-      .status {
-        min-height: 1.35rem;
-        margin: 1.1rem 0 0;
-        font-size: 0.92rem;
-        color: var(--muted);
-        animation: fade-up 0.8s ease 0.12s both;
-      }
+      .skeleton { border-bottom: 1px solid var(--line); padding: 18px 8px; animation: dim 1.1s ease-in-out infinite; }
+      .skeleton .a { height: 16px; background: #edeae0; }
+      .skeleton .b { height: 12px; margin-top: 9px; background: #f0eee6; }
 
-      .status.error {
-        color: #8a3b2d;
-      }
+      .more { margin-top: 16px; border: none; background: transparent; font-size: 15px; color: var(--ink); padding: 0; min-height: 44px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: #c9c4b6; }
+      .more:hover { color: var(--accent); }
 
-      .intro {
-        margin: 2.25rem 0 1.25rem;
-        font-family: "Libre Baskerville", Georgia, serif;
-        font-size: 1.15rem;
-        line-height: 1.45;
-        animation: fade-up 0.55s ease both;
-      }
+      .error { margin-top: 24px; border-left: 2px solid var(--accent); padding-left: 14px; }
+      .error h2 { font-family: "Source Serif 4", Georgia, serif; font-size: 20px; font-weight: 400; margin: 0 0 6px; }
+      .error p { font-size: 15px; line-height: 1.6; color: var(--muted); max-width: 46ch; margin: 0; }
+      .error button { margin-top: 8px; border: none; background: transparent; font-size: 15px; font-weight: 500; color: var(--accent); padding: 0; min-height: 44px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 
-      .results {
-        display: grid;
-        gap: 1rem;
-        margin-top: 1.5rem;
-      }
+      .foot { margin-top: 54px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.7; color: var(--muted); }
 
-      .card {
-        background: var(--card);
-        border: 1px solid rgba(26, 26, 26, 0.08);
-        border-radius: 2px;
-        padding: 1.35rem 1.4rem 1.25rem;
-        opacity: 0;
-        transform: translateY(10px);
-        animation: fade-up 0.55s ease forwards;
-      }
-
-      .card:nth-child(1) { animation-delay: 0.05s; }
-      .card:nth-child(2) { animation-delay: 0.1s; }
-      .card:nth-child(3) { animation-delay: 0.15s; }
-      .card:nth-child(4) { animation-delay: 0.2s; }
-      .card:nth-child(5) { animation-delay: 0.25s; }
-      .card:nth-child(6) { animation-delay: 0.3s; }
-      .card:nth-child(7) { animation-delay: 0.35s; }
-      .card:nth-child(8) { animation-delay: 0.4s; }
-      .card:nth-child(9) { animation-delay: 0.45s; }
-      .card:nth-child(10) { animation-delay: 0.5s; }
-
-      .card-title {
-        margin: 0;
-        font-family: "Libre Baskerville", Georgia, serif;
-        font-size: 1.25rem;
-        font-weight: 400;
-        line-height: 1.3;
-      }
-
-      .card-title .rating {
-        white-space: nowrap;
-      }
-
-      .why {
-        margin: 0.65rem 0 0;
-        color: var(--ink);
-        line-height: 1.5;
-        font-size: 1rem;
-      }
-
-      .address {
-        margin: 0.85rem 0 0;
-        color: var(--muted);
-        font-size: 0.95rem;
-        line-height: 1.4;
-      }
-
-      .links {
-        margin: 0.7rem 0 0;
-        display: flex;
-        gap: 0.65rem;
-        align-items: center;
-        font-size: 0.95rem;
-        font-weight: 600;
-      }
-
-      .links a {
-        color: var(--ink);
-        text-decoration: underline;
-        text-underline-offset: 3px;
-      }
-
-      .links .sep {
-        color: var(--muted);
-        font-weight: 400;
-      }
-
-      @keyframes fade-up {
-        from {
-          opacity: 0;
-          transform: translateY(12px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
-
-      @media (max-width: 560px) {
-        .page {
-          padding-top: 3rem;
-        }
-
-        .controls {
-          flex-direction: column;
-          align-items: stretch;
-        }
-
-        #search-btn {
-          width: 100%;
-        }
-      }
+      @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+      @keyframes rise { from { opacity: 0; transform: translateY(5px) } to { opacity: 1; transform: none } }
+      @keyframes dim { 0%, 100% { opacity: .5 } 50% { opacity: .18 } }
+      @keyframes blink { 0%, 100% { opacity: 1 } 50% { opacity: 0 } }
     </style>
   </head>
   <body>
     <main class="page">
-      <header class="hero">
-        <h1>Find your coffee in Barcelona</h1>
-        <p class="lede">
-          Ask in plain language. We’ll find cafes from a curated local guide.
-        </p>
+      <div class="brand"><span class="logo"><i></i></span> Top Coffee</div>
+
+      <header class="hero" id="hero">
+        <h1>Coffee break? Find your top.</h1>
       </header>
 
       <form class="search" id="search-form">
         <div class="search-row">
           <label class="sr-only" for="query">Search</label>
-          <input
-            id="query"
-            name="query"
-            type="search"
-            placeholder="Filter coffee near Sagrada Familia"
-            autocomplete="off"
-            required
-          />
-          <div class="controls">
-            <div class="pills" role="group" aria-label="Number of results">
-              <span>Results</span>
-              <button type="button" class="pill" data-topn="3" aria-pressed="false">3</button>
-              <button type="button" class="pill" data-topn="5" aria-pressed="true">5</button>
-              <button type="button" class="pill" data-topn="10" aria-pressed="false">10</button>
-            </div>
-            <button type="submit" id="search-btn">Search</button>
-          </div>
+          <input id="query" name="query" type="search" placeholder="quiet place to work in Gràcia" autocomplete="off" required />
+          <button type="button" class="linkbtn" id="clear-btn" hidden>Clear</button>
+          <button type="submit" id="search-btn">Ask →</button>
         </div>
+        <div class="tokens" id="tokens" hidden></div>
+        <div class="spacer" id="spacer"></div>
       </form>
 
-      <p id="status" class="status" aria-live="polite"></p>
-      <p id="intro" class="intro" hidden></p>
+      <div class="pills" id="examples"></div>
+
+      <div class="statusrow" id="statusrow" hidden>
+        <p class="status pulse" id="status" aria-live="polite"></p>
+        <button type="button" class="underlined" id="stop-btn">Stop</button>
+      </div>
+
+      <p class="answer" id="answer" hidden></p>
+      <p class="notice" id="notice" hidden></p>
+
+      <div class="map-wrap" id="map-wrap" hidden>
+        <div class="map" id="map"></div>
+        <div class="caption" id="map-caption">Pins follow cafe coordinates</div>
+      </div>
+
+      <div class="resultshead" id="results-head" hidden>
+        <span id="results-count"></span>
+        <button type="button" class="underlined" id="copy-btn">Copy link</button>
+      </div>
+
       <section id="results" class="results" aria-live="polite"></section>
+      <button type="button" class="more" id="more-btn" hidden>Show more</button>
+
+      <div class="error" id="error" hidden>
+        <h2>The search failed on our side.</h2>
+        <p>Your question is still in the field and in the link, so nothing is lost.</p>
+        <button type="button" id="retry-btn">Ask again</button>
+      </div>
+
+      <div class="foot">
+        <div>Coffee only. If the guide has nothing, it says so instead of guessing.</div>
+        <div id="keyhint" hidden>Press / to ask, Esc to start over.</div>
+      </div>
     </main>
 
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
     <script>
-      const form = document.getElementById("search-form");
-      const queryInput = document.getElementById("query");
-      const searchBtn = document.getElementById("search-btn");
-      const statusEl = document.getElementById("status");
-      const introEl = document.getElementById("intro");
-      const resultsEl = document.getElementById("results");
-      const pills = [...document.querySelectorAll(".pill[data-topn]")];
+      const EXAMPLES = [
+        { intent: "EN", label: "quiet place to work in Gràcia" },
+        { intent: "ES", label: "café de especialidad cerca de la Barceloneta" },
+        { intent: "中文", label: "哥特区哪里能喝到手冲" },
+        { intent: "RU", label: "тихое место с ноутбуком в Грасии" },
+      ];
 
-      let topN = 5;
+      const $ = (id) => document.getElementById(id);
+      const state = {
+        cards: [],
+        openId: null,
+        query: "",
+        topN: 5,
+        canShowMore: false,
+        stream: null,
+        abort: null,
+        leaflet: null,
+      };
 
-      pills.forEach((pill) => {
-        pill.addEventListener("click", () => {
-          topN = Number(pill.dataset.topn);
-          pills.forEach((p) =>
-            p.setAttribute("aria-pressed", String(p === pill))
-          );
-        });
-      });
-
-      function setStatus(message, isError = false) {
-        statusEl.textContent = message || "";
-        statusEl.classList.toggle("error", Boolean(isError && message));
+      function starsFor(rating) {
+        const n = Math.round(Number(rating) || 0);
+        return "★".repeat(Math.max(0, Math.min(5, n))) + "☆".repeat(Math.max(0, 5 - n));
       }
 
-      function escapeHtml(str) {
-        return String(str)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;");
+      function siteLabel(url) {
+        try {
+          return new URL(url).hostname.replace(/^www\./, "");
+        } catch {
+          return String(url || "").replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "");
+        }
+      }
+
+      function cardFromResult(meta) {
+        return {
+          id: meta.place_id || meta.name,
+          name: meta.name || "Unknown",
+          rating: meta.rating || "",
+          why: meta.why || "",
+          address: meta.address || "",
+          district: meta.district || "",
+          mapUrl: meta.place_id
+            ? `https://www.google.com/maps/place/?q=place_id:${meta.place_id}`
+            : null,
+          siteUrl: meta.website || null,
+          latitude: meta.latitude ?? null,
+          longitude: meta.longitude ?? null,
+        };
+      }
+
+      function cardsFromResults(results, intro) {
+        return {
+          intro: intro || "",
+          cafes: (results || []).map(cardFromResult),
+        };
       }
 
       function parseLinkLine(line) {
         const map = line.match(/\[map\]\((https?:\/\/[^)\s]+)\)/i);
         const site = line.match(/\[site\]\((https?:\/\/[^)\s]+)\)/i);
-        return {
-          mapUrl: map?.[1] || null,
-          siteUrl: site?.[1] || null,
-        };
+        return { mapUrl: map?.[1] || null, siteUrl: site?.[1] || null };
       }
 
-      /** Parse the same RAG answer format used by the admin UI. */
       function parseAnswer(answer, apiResults = []) {
         const byName = new Map(
-          (apiResults || []).map((r) => [
-            String(r.name || "").trim().toLowerCase(),
-            r,
-          ])
+          (apiResults || []).map((r) => [String(r.name || "").trim().toLowerCase(), r])
         );
-
         const blocks = String(answer || "")
           .trim()
           .split(/\n\s*\n/)
@@ -391,19 +294,9 @@
         const cafes = [];
 
         for (const block of blocks) {
-          const lines = block
-            .split("\n")
-            .map((l) => l.trim())
-            .filter(Boolean);
+          const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
           if (!lines.length) continue;
-
           const titleMatch = lines[0].match(/^(.*?)\s*★\s*([\d.]+)\s*$/);
-
-          if (!titleMatch && cafes.length === 0 && !intro) {
-            intro = lines.join(" ");
-            continue;
-          }
-
           if (!titleMatch) {
             if (!intro) intro = lines.join(" ");
             continue;
@@ -411,138 +304,549 @@
 
           const name = titleMatch[1].trim();
           const rating = titleMatch[2];
+          const meta = byName.get(name.toLowerCase()) || {};
           let why = "";
-          let address = "";
-          let mapUrl = null;
-          let siteUrl = null;
+          let address = meta.address || "";
+          let mapUrl = meta.place_id
+            ? `https://www.google.com/maps/place/?q=place_id:${meta.place_id}`
+            : null;
+          let siteUrl = meta.website || null;
 
           const linkLine = lines.find((l) => /\[map\]|\[site\]/i.test(l));
           if (linkLine) {
-            ({ mapUrl, siteUrl } = parseLinkLine(linkLine));
+            const parsed = parseLinkLine(linkLine);
+            mapUrl = parsed.mapUrl || mapUrl;
+            siteUrl = parsed.siteUrl || siteUrl;
           }
 
-          const contentLines = lines
-            .slice(1)
-            .filter((l) => !/\[map\]|\[site\]/i.test(l));
+          const contentLines = lines.slice(1).filter((l) => !/\[map\]|\[site\]/i.test(l));
           if (contentLines.length >= 1) why = contentLines[0];
-          if (contentLines.length >= 2) {
+          if (contentLines.length >= 2 && !address) {
             address = contentLines.slice(1).join(" ");
           }
 
-          const meta = byName.get(name.toLowerCase());
-          if (!mapUrl && meta?.place_id) {
-            mapUrl = `https://www.google.com/maps/place/?q=place_id:${meta.place_id}`;
-          }
-          if (!siteUrl && meta?.website) {
-            siteUrl = meta.website;
-          }
-          if (!address && meta?.address) {
-            address = meta.address;
-          }
+          cafes.push({
+            id: meta.place_id || name,
+            name,
+            rating: rating || meta.rating || "",
+            why,
+            address,
+            district: meta.district || "",
+            mapUrl,
+            siteUrl,
+            latitude: meta.latitude ?? null,
+            longitude: meta.longitude ?? null,
+          });
+        }
 
-          cafes.push({ name, rating, why, address, mapUrl, siteUrl });
+        if (!cafes.length && apiResults.length) {
+          for (const meta of apiResults) {
+            cafes.push({
+              id: meta.place_id || meta.name,
+              name: meta.name || "Unknown",
+              rating: meta.rating || "",
+              why: "",
+              address: meta.address || "",
+              district: meta.district || "",
+              mapUrl: meta.place_id
+                ? `https://www.google.com/maps/place/?q=place_id:${meta.place_id}`
+                : null,
+              siteUrl: meta.website || null,
+              latitude: meta.latitude ?? null,
+              longitude: meta.longitude ?? null,
+            });
+          }
         }
 
         return { intro, cafes };
       }
 
-      function renderResults(parsed) {
-        if (parsed.intro) {
-          introEl.hidden = false;
-          introEl.textContent = parsed.intro;
-        } else {
-          introEl.hidden = true;
-          introEl.textContent = "";
+      function parseSearchPayload(data) {
+        const results = data.results || [];
+        if (results.length) {
+          const intro =
+            data.intro ||
+            String(data.answer || "")
+              .trim()
+              .split(/\n\s*\n/)[0] ||
+            "";
+          return cardsFromResults(results, intro);
         }
-
-        resultsEl.innerHTML = parsed.cafes
-          .map((cafe) => {
-            const links = [];
-            if (cafe.mapUrl) {
-              links.push(
-                `<a href="${escapeHtml(cafe.mapUrl)}" target="_blank" rel="noopener">map</a>`
-              );
-            }
-            if (cafe.siteUrl) {
-              links.push(
-                `<a href="${escapeHtml(cafe.siteUrl)}" target="_blank" rel="noopener">site</a>`
-              );
-            }
-            const linksHtml = links.length
-              ? `<div class="links">${links.join('<span class="sep">·</span>')}</div>`
-              : "";
-
-            return `
-              <article class="card">
-                <h2 class="card-title">
-                  ${escapeHtml(cafe.name)}
-                  ${
-                    cafe.rating
-                      ? `<span class="rating"> ★ ${escapeHtml(cafe.rating)}</span>`
-                      : ""
-                  }
-                </h2>
-                ${
-                  cafe.why
-                    ? `<p class="why">${escapeHtml(cafe.why)}</p>`
-                    : ""
-                }
-                ${
-                  cafe.address
-                    ? `<p class="address">${escapeHtml(cafe.address)}</p>`
-                    : ""
-                }
-                ${linksHtml}
-              </article>
-            `;
-          })
-          .join("");
+        return parseAnswer(data.answer || "", results);
       }
 
-      form.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const query = queryInput.value.trim();
-        if (!query) return;
+      function cafeHasGeo(c) {
+        return Number.isFinite(Number(c.latitude)) && Number.isFinite(Number(c.longitude));
+      }
 
-        searchBtn.disabled = true;
-        introEl.hidden = true;
-        introEl.textContent = "";
-        resultsEl.innerHTML = "";
-        setStatus("Searching…");
+      function projectPins(cards) {
+        const pts = cards.filter(
+          (c) => Number.isFinite(Number(c.latitude)) && Number.isFinite(Number(c.longitude))
+        );
+        if (!pts.length) {
+          return cards.map((c, i) => ({
+            ...c,
+            x: `${18 + (i % 5) * 16}%`,
+            y: `${32 + (i % 2) * 28}%`,
+            geo: false,
+          }));
+        }
+        const lats = pts.map((c) => Number(c.latitude));
+        const lons = pts.map((c) => Number(c.longitude));
+        const minLat = Math.min(...lats);
+        const maxLat = Math.max(...lats);
+        const minLon = Math.min(...lons);
+        const maxLon = Math.max(...lons);
+        const latSpan = Math.max(maxLat - minLat, 0.002);
+        const lonSpan = Math.max(maxLon - minLon, 0.002);
+        return cards.map((c, i) => {
+          if (!Number.isFinite(Number(c.latitude)) || !Number.isFinite(Number(c.longitude))) {
+            return { ...c, x: `${18 + (i % 5) * 16}%`, y: `${32 + (i % 2) * 28}%`, geo: false };
+          }
+          const x = 14 + ((Number(c.longitude) - minLon) / lonSpan) * 72;
+          const y = 18 + (1 - (Number(c.latitude) - minLat) / latSpan) * 62;
+          return { ...c, x: `${x}%`, y: `${y}%`, geo: true };
+        });
+      }
+
+      function renderExamples(target, items) {
+        target.innerHTML = "";
+        items.forEach((ex) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "pill";
+          b.innerHTML = '<span class="intent"></span><span class="txt"></span>';
+          b.querySelector(".intent").textContent = ex.intent || "";
+          b.querySelector(".txt").textContent = ex.label;
+          b.addEventListener("click", () => {
+            $("query").value = ex.label;
+            search(ex.label);
+          });
+          target.appendChild(b);
+        });
+      }
+
+      function renderTokens(tokens) {
+        const box = $("tokens");
+        box.innerHTML = '<span class="label">Read as</span>';
+        tokens.forEach((t) => {
+          const el = document.createElement("span");
+          el.className = "token";
+          el.innerHTML = '<span class="kind"></span><span class="val"></span>';
+          el.querySelector(".kind").textContent = t[0];
+          el.querySelector(".val").textContent = t[1];
+          box.appendChild(el);
+        });
+        box.hidden = tokens.length === 0;
+        $("spacer").hidden = tokens.length > 0;
+      }
+
+      function tokensFrom(query, location) {
+        const out = [];
+        if (location?.location) out.push(["area", location.location]);
+        const s = query.toLowerCase();
+        if (/work|laptop|ноут|办公/.test(s)) out.push(["need", "laptop-friendly"]);
+        if (/quiet|тих|安静/.test(s)) out.push(["need", "quiet"]);
+        if (/specialty|filter|фильтр|especialidad|手冲/.test(s)) out.push(["need", "specialty"]);
+        if (!out.length) out.push(["search", query.length > 36 ? `${query.slice(0, 36)}…` : query]);
+        return out;
+      }
+
+      function answerParts(intro, cards) {
+        const names = cards.map((c) => c.name).filter(Boolean);
+        if (!intro) return names.length ? [{ place: names[0] }] : [];
+        const parts = [];
+        let rest = intro;
+        const sorted = [...names].sort((a, b) => b.length - a.length);
+        while (rest) {
+          let hit = null;
+          let at = -1;
+          for (const name of sorted) {
+            const i = rest.indexOf(name);
+            if (i >= 0 && (at < 0 || i < at)) {
+              hit = name;
+              at = i;
+            }
+          }
+          if (!hit) {
+            parts.push(rest);
+            break;
+          }
+          if (at > 0) parts.push(rest.slice(0, at));
+          parts.push({ place: hit });
+          rest = rest.slice(at + hit.length);
+        }
+        return parts;
+      }
+
+      function renderAnswer(parts, upTo) {
+        const p = $("answer");
+        p.innerHTML = "";
+        let budget = upTo === undefined ? Infinity : upTo;
+        parts.forEach((part) => {
+          if (budget <= 0) return;
+          if (typeof part === "string") {
+            const words = part.split(/(\s+)/);
+            const take = [];
+            for (const w of words) {
+              if (!w) continue;
+              if (budget <= 0) break;
+              take.push(w);
+              if (w.trim()) budget -= 1;
+            }
+            p.appendChild(document.createTextNode(take.join("")));
+          } else {
+            budget -= 1;
+            const b = document.createElement("button");
+            b.type = "button";
+            b.className = "place";
+            b.textContent = part.place;
+            b.addEventListener("click", () => toggle(part.place, true));
+            p.appendChild(b);
+          }
+        });
+        if (upTo !== undefined) {
+          p.appendChild(Object.assign(document.createElement("span"), { className: "caret" }));
+        }
+        p.hidden = false;
+      }
+
+      function stream(parts) {
+        if (state.stream) clearInterval(state.stream);
+        const total = parts.reduce(
+          (n, p) => n + (typeof p === "string" ? p.split(/\s+/).filter(Boolean).length : 1),
+          0
+        );
+        let i = 0;
+        renderAnswer(parts, 0);
+        state.stream = setInterval(() => {
+          i += 1;
+          if (i >= total) {
+            clearInterval(state.stream);
+            state.stream = null;
+            renderAnswer(parts);
+          } else {
+            renderAnswer(parts, i);
+          }
+        }, 36);
+      }
+
+      function renderRows() {
+        const box = $("results");
+        box.innerHTML = "";
+        const cards = state.cards;
+        cards.forEach((c, i) => {
+          const on = state.openId === c.id || state.openId === c.name;
+          const row = document.createElement("div");
+          row.className = "row" + (on ? " on" : "");
+          row.innerHTML =
+            '<button type="button" class="rowhead">' +
+              '<span class="left">' +
+                '<span class="num"></span>' +
+                "<span>" +
+                  '<span class="name"></span>' +
+                  '<span class="meta1"><span class="stars"></span> <span class="rating"></span><span class="district"></span></span>' +
+                "</span>" +
+              "</span>" +
+              '<span class="toggle"></span>' +
+            "</button>";
+          row.querySelector(".num").textContent = String(i + 1);
+          row.querySelector(".name").textContent = c.name;
+          row.querySelector(".stars").textContent = c.rating ? starsFor(c.rating) : "";
+          row.querySelector(".rating").textContent = c.rating ? c.rating : "";
+          row.querySelector(".district").textContent = c.district ? ` · ${c.district}` : "";
+          row.querySelector(".toggle").textContent = on ? "Hide" : "Details";
+          row.querySelector(".rowhead").addEventListener("click", () => toggle(c.id));
+
+          if (on) {
+            const d = document.createElement("div");
+            d.className = "details";
+            d.innerHTML = '<p></p><div class="addr"></div><div class="links"></div>';
+            d.querySelector("p").textContent = c.why || "Listed because it matches the guide for this search.";
+            d.querySelector(".addr").textContent = c.address || "";
+            const links = d.querySelector(".links");
+            if (c.mapUrl) {
+              const maps = document.createElement("a");
+              maps.target = "_blank";
+              maps.rel = "noopener";
+              maps.href = c.mapUrl;
+              maps.textContent = "Open in Maps";
+              links.appendChild(maps);
+              const dest = c.address || c.name;
+              const dir = document.createElement("a");
+              dir.target = "_blank";
+              dir.rel = "noopener";
+              dir.href = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}`;
+              dir.textContent = "Directions";
+              links.appendChild(dir);
+            }
+            if (c.siteUrl) {
+              const site = document.createElement("a");
+              site.target = "_blank";
+              site.rel = "noopener";
+              site.href = c.siteUrl;
+              site.textContent = siteLabel(c.siteUrl);
+              links.appendChild(site);
+            } else {
+              const none = document.createElement("span");
+              none.textContent = "No website in the guide";
+              links.appendChild(none);
+            }
+            row.appendChild(d);
+          }
+          box.appendChild(row);
+        });
+        const hasGeo = cards.some(cafeHasGeo);
+        $("map-wrap").hidden = !hasGeo;
+        renderPins(cards);
+        $("results-head").hidden = state.cards.length === 0;
+        $("results-count").textContent =
+          state.cards.length === 1
+            ? "1 place from the guide"
+            : `${state.cards.length} places from the guide`;
+        $("map-caption").textContent = hasGeo
+          ? "Pins follow cafe coordinates"
+          : "Pins follow the list";
+        $("more-btn").hidden = !state.canShowMore;
+      }
+
+      function renderPins(cards) {
+        const geo = cards.filter(cafeHasGeo);
+        const mapEl = $("map");
+        const wrap = $("map-wrap");
+        if (!geo.length) {
+          if (state.leaflet) {
+            state.leaflet.markers.clearLayers();
+          }
+          return;
+        }
+        if (window.L) {
+          if (!state.leaflet) {
+            const map = L.map(mapEl, {
+              zoomControl: false,
+              attributionControl: true,
+            });
+            L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+              attribution: "&copy; OpenStreetMap &copy; CARTO",
+              subdomains: "abcd",
+              maxZoom: 19,
+            }).addTo(map);
+            state.leaflet = { map, markers: L.layerGroup().addTo(map) };
+          }
+          const { map, markers } = state.leaflet;
+          markers.clearLayers();
+          const bounds = [];
+          geo.forEach((c, i) => {
+            const lat = Number(c.latitude);
+            const lng = Number(c.longitude);
+            const on = state.openId === c.id || state.openId === c.name;
+            const icon = L.divIcon({
+              className: "pin" + (on ? " on" : ""),
+              html: `<span class="dot">${i + 1}</span><span class="stick"></span>`,
+              iconSize: [26, 36],
+              iconAnchor: [13, 36],
+            });
+            const marker = L.marker([lat, lng], { icon, title: c.name });
+            marker.on("click", () => toggle(c.id));
+            marker.addTo(markers);
+            bounds.push([lat, lng]);
+          });
+          wrap.hidden = false;
+          map.invalidateSize();
+          if (bounds.length === 1) {
+            map.setView(bounds[0], 15);
+          } else {
+            map.fitBounds(bounds, { padding: [24, 24], maxZoom: 16 });
+          }
+          return;
+        }
+        const projected = projectPins(cards);
+        mapEl.querySelectorAll(".pin").forEach((p) => p.remove());
+        projected.forEach((c, i) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "pin" + (state.openId === c.id || state.openId === c.name ? " on" : "");
+          b.style.position = "absolute";
+          b.style.transform = "translate(-50%, -100%)";
+          b.style.left = c.x;
+          b.style.top = c.y;
+          b.title = c.name;
+          b.innerHTML = '<span class="dot"></span><span class="stick"></span>';
+          b.querySelector(".dot").textContent = String(i + 1);
+          b.addEventListener("click", () => toggle(c.id));
+          mapEl.appendChild(b);
+        });
+      }
+
+      function renderSkeletons(n) {
+        const box = $("results");
+        box.querySelectorAll(".skeleton").forEach((s) => s.remove());
+        const widths = [["48%", "70%"], ["36%", "82%"], ["56%", "60%"]];
+        for (let i = 0; i < n; i++) {
+          const s = document.createElement("div");
+          s.className = "skeleton";
+          s.innerHTML = `<div class="a" style="width:${widths[i % 3][0]}"></div><div class="b" style="width:${widths[i % 3][1]}"></div>`;
+          box.appendChild(s);
+        }
+      }
+
+      function toggle(id, scroll) {
+        const card = state.cards.find((c) => c.id === id || c.name === id);
+        const key = card ? card.id : id;
+        state.openId = state.openId === key ? null : key;
+        renderRows();
+        if (scroll && state.openId) {
+          const i = state.cards.findIndex((c) => c.id === state.openId);
+          const row = $("results").children[i];
+          if (row) {
+            window.scrollTo({
+              top: row.getBoundingClientRect().top + window.scrollY - 90,
+              behavior: "smooth",
+            });
+          }
+        }
+      }
+
+      function resetView() {
+        if (state.abort) state.abort.abort();
+        if (state.stream) clearInterval(state.stream);
+        state.cards = [];
+        state.openId = null;
+        state.canShowMore = false;
+        $("results").innerHTML = "";
+        ["answer", "notice", "map-wrap", "results-head", "more-btn", "error", "statusrow", "tokens"].forEach(
+          (id) => ($(id).hidden = true)
+        );
+        $("spacer").hidden = false;
+        $("hero").hidden = false;
+        $("examples").hidden = false;
+        $("search-btn").disabled = false;
+      }
+
+      async function search(q, topN = 5) {
+        q = (q || "").trim();
+        if (!q) return;
+        state.query = q;
+        state.topN = topN;
+        if (state.abort) state.abort.abort();
+        if (state.stream) clearInterval(state.stream);
+        history.replaceState(null, "", `${location.pathname}${location.search}#q=${encodeURIComponent(q)}`);
+        $("clear-btn").hidden = false;
+        $("search-btn").disabled = true;
+
+        state.cards = [];
+        state.openId = null;
+        $("results").innerHTML = "";
+        ["answer", "notice", "map-wrap", "results-head", "more-btn", "error"].forEach((id) => ($(id).hidden = true));
+        $("hero").hidden = true;
+        $("examples").hidden = true;
+        renderTokens(tokensFrom(q, null));
+        $("statusrow").hidden = false;
+        $("status").textContent = "Searching the guide…";
+        renderSkeletons(3);
+
+        const controller = new AbortController();
+        state.abort = controller;
 
         try {
           const res = await fetch("/api/rag/search", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ query, topN }),
+            body: JSON.stringify({ query: q, topN }),
+            signal: controller.signal,
           });
           const data = await res.json().catch(() => ({}));
-          if (!res.ok) {
-            throw new Error(data.error || `Request failed (${res.status})`);
+          if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+
+          const parsed = parseSearchPayload(data);
+          state.cards = parsed.cafes;
+          state.canShowMore = topN < 10 && parsed.cafes.length >= topN;
+          renderTokens(tokensFrom(q, data.location));
+          $("statusrow").hidden = true;
+          renderSkeletons(0);
+          $("search-btn").disabled = false;
+
+          if (data.location?.notice) {
+            $("notice").textContent = data.location.notice;
+            $("notice").hidden = false;
           }
 
-          const parsed = parseAnswer(data.answer || "", data.results || []);
           if (!parsed.cafes.length) {
-            introEl.hidden = false;
-            introEl.textContent =
-              data.answer || "No matching cafes found in the local guide.";
-            setStatus("");
+            $("answer").hidden = false;
+            $("answer").textContent =
+              parsed.intro || data.answer || "Nothing in the guide matches this.";
             return;
           }
 
-          renderResults(parsed);
-          const loc = data.location;
-          const locBit =
-            loc?.applied && loc.location
-              ? `Near ${loc.location}`
-              : "Barcelona";
-          setStatus(`${parsed.cafes.length} cafes · ${locBit}`);
+          stream(answerParts(parsed.intro, parsed.cafes));
+          renderRows();
         } catch (err) {
-          setStatus(err.message || "Search failed", true);
-        } finally {
-          searchBtn.disabled = false;
+          if (err.name === "AbortError") {
+            $("status").textContent = "Stopped.";
+            $("status").classList.remove("pulse");
+            $("search-btn").disabled = false;
+            renderSkeletons(0);
+            return;
+          }
+          $("statusrow").hidden = true;
+          renderSkeletons(0);
+          $("error").hidden = false;
+          $("search-btn").disabled = false;
+        }
+      }
+
+      renderExamples($("examples"), EXAMPLES);
+
+      $("search-form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        $("query").blur();
+        search($("query").value, 5);
+      });
+      $("query").addEventListener("input", (e) => {
+        $("clear-btn").hidden = !e.target.value;
+      });
+      $("query").addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          $("query").value = "";
+          $("clear-btn").hidden = true;
+          resetView();
+          history.replaceState(null, "", location.pathname + location.search);
         }
       });
+      $("clear-btn").addEventListener("click", () => {
+        $("query").value = "";
+        $("clear-btn").hidden = true;
+        resetView();
+        $("query").focus();
+        history.replaceState(null, "", location.pathname + location.search);
+      });
+      $("stop-btn").addEventListener("click", () => {
+        if (state.abort) state.abort.abort();
+      });
+      $("retry-btn").addEventListener("click", () => search(state.query, state.topN));
+      $("more-btn").addEventListener("click", () => search(state.query, 10));
+      $("copy-btn").addEventListener("click", () => {
+        if (navigator.clipboard) navigator.clipboard.writeText(location.href);
+        $("copy-btn").textContent = "Link copied";
+        setTimeout(() => ($("copy-btn").textContent = "Copy link"), 1800);
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "/" && document.activeElement !== $("query")) {
+          e.preventDefault();
+          $("query").focus();
+        }
+      });
+
+      if (window.innerWidth > 820) {
+        $("query").focus();
+        $("keyhint").hidden = false;
+      }
+      const fromUrl = /[?&#]q=([^&]+)/.exec(location.href);
+      if (fromUrl) {
+        const q = decodeURIComponent(fromUrl[1].replace(/\+/g, " "));
+        $("query").value = q;
+        search(q);
+      }
     </script>
   </body>
 </html>

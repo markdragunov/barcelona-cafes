@@ -79,3 +79,47 @@ def find_neighborhood(location: str) -> dict[str, Any] | None:
         return None
     index = _lookup_index()
     return index.get(key) or index.get(key.replace(" ", ""))
+
+
+def _latin_alias_in_query(key: str, normalized_query: str) -> bool:
+    if not key:
+        return False
+    compact_query = normalized_query.replace(" ", "")
+    compact_key = key.replace(" ", "")
+    if re.search(rf"(?:^|\s){re.escape(key)}(?:\s|$)", normalized_query):
+        return True
+    if " " in key and compact_key and compact_key in compact_query:
+        return True
+    return False
+
+
+def find_neighborhood_in_query(query: str) -> dict[str, Any] | None:
+    """Scan a full user query for a known neighborhood name or alias."""
+    if not (query or "").strip():
+        return None
+    folded = query.casefold()
+    normalized = normalize_name(query)
+    best: dict[str, Any] | None = None
+    best_len = 0
+    for entry in load_neighborhoods():
+        if entry.get("aggregate"):
+            continue
+        record = {
+            "id": entry["id"],
+            "name": entry["name"],
+            "centroid": _centroid(entry["viewport"]),
+        }
+        names = [entry["id"], entry["name"], *entry.get("aliases", [])]
+        for name in names:
+            raw = str(name or "").strip()
+            if not raw:
+                continue
+            matched = False
+            if re.search(r"[^\x00-\x7f]", raw):
+                matched = raw.casefold() in folded
+            else:
+                matched = _latin_alias_in_query(normalize_name(raw), normalized)
+            if matched and len(raw) > best_len:
+                best = record
+                best_len = len(raw)
+    return best

@@ -195,14 +195,15 @@ def _parse_reasons_json(raw: str) -> dict[str, Any]:
     return json.loads(text)
 
 
-def answer_with_llm(
+def recommend_cafes(
     client: OpenAI, query: str, cafes: list[dict[str, Any]]
-) -> str:
+) -> dict[str, Any]:
     if not cafes:
-        return (
+        intro = (
             "I could not find relevant cafes in the local index for that question. "
             "Try re-indexing or broadening the query."
         )
+        return {"intro": intro, "reasons_by_id": {}, "answer": intro}
 
     context = _format_context(cafes)
     user_content = (
@@ -245,7 +246,17 @@ def answer_with_llm(
         )
         for cafe in cafes
     ]
-    return intro + "\n\n" + "\n\n".join(blocks)
+    return {
+        "intro": intro,
+        "reasons_by_id": reasons_by_id,
+        "answer": intro + "\n\n" + "\n\n".join(blocks),
+    }
+
+
+def answer_with_llm(
+    client: OpenAI, query: str, cafes: list[dict[str, Any]]
+) -> str:
+    return recommend_cafes(client, query, cafes)["answer"]
 
 
 def hybrid_search_and_answer(
@@ -264,7 +275,7 @@ def hybrid_search_and_answer(
 
     client = OpenAI(api_key=openai_api_key)
 
-    location_info = resolve_location_filter(client, google_api_key or "", query)
+    location_info = resolve_location_filter(google_api_key or "", query)
     allowed: set[str] | None = None
     if location_info["applied"]:
         place_ids = location_info.get("place_ids") or []
@@ -272,6 +283,10 @@ def hybrid_search_and_answer(
             loc = location_info.get("location") or "that location"
             return {
                 "answer": (
+                    f"I couldn't find cafes within 1 km of {loc} "
+                    "in the local database. Try a broader area."
+                ),
+                "intro": (
                     f"I couldn't find cafes within 1 km of {loc} "
                     "in the local database. Try a broader area."
                 ),
@@ -300,10 +315,12 @@ def hybrid_search_and_answer(
         bm25_hits = fut_b.result()
 
     merged = merge_hybrid(vector_hits, bm25_hits, top_n)
-    answer = answer_with_llm(client, query, merged)
+    recommendation = recommend_cafes(client, query, merged)
+    reasons_by_id = recommendation.get("reasons_by_id") or {}
 
     payload: dict[str, Any] = {
-        "answer": answer,
+        "answer": recommendation["answer"],
+        "intro": recommendation.get("intro") or "",
         "top_n": top_n,
         "results": [
             {
@@ -313,6 +330,9 @@ def hybrid_search_and_answer(
                 "rating": (c.get("metadata") or {}).get("rating"),
                 "district": (c.get("metadata") or {}).get("district"),
                 "website": (c.get("metadata") or {}).get("website"),
+                "latitude": (c.get("metadata") or {}).get("latitude"),
+                "longitude": (c.get("metadata") or {}).get("longitude"),
+                "why": reasons_by_id.get(c["place_id"]) or "",
                 "combined_score": c.get("combined_score"),
                 "vector_rank": c.get("vector_rank"),
                 "bm25_rank": c.get("bm25_rank"),

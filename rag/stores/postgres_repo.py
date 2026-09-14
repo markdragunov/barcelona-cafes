@@ -17,7 +17,7 @@ class PostgresCafeRepository:
         cafes = fetch_all(
             """
             SELECT place_id, name, address, rating, website,
-                   neighborhood_name, coffee_content
+                   neighborhood_name, coffee_content, latitude, longitude
             FROM cafes ORDER BY lower(name)
             """
         )

@@ -24,6 +24,7 @@ import {
   getCafesNeedingCoffeeContent,
   countCafesWithCoffeeContent,
   updateCoffeeContent,
+  listCafeCoordinates,
 } from "./db.js";
 import {
   NEIGHBORHOOD_LIST,
@@ -33,7 +34,7 @@ import {
 import { collectCafes } from "./places.js";
 import { extractCoffeeContent } from "./extract.js";
 import { SEARCH_QUERIES } from "./queries.js";
-import { runRag } from "./ragBridge.js";
+import { runRag, warmupRagWorker } from "./ragBridge.js";
 import {
   requireAdmin,
   rateLimit,
@@ -604,6 +605,27 @@ app.post("/api/rag/index", async (_req, res) => {
   }
 });
 
+async function attachCafeCoordinates(results) {
+  if (!Array.isArray(results) || results.length === 0) return results;
+  try {
+    const coords = await listCafeCoordinates();
+    const byId = new Map(
+      coords.map((row) => [row.place_id, row])
+    );
+    return results.map((row) => {
+      const extra = byId.get(row.place_id);
+      if (!extra) return row;
+      return {
+        ...row,
+        latitude: extra.latitude,
+        longitude: extra.longitude,
+      };
+    });
+  } catch {
+    return results;
+  }
+}
+
 app.post(
   "/api/rag/search",
   searchGlobalRateLimit,
@@ -644,10 +666,12 @@ app.post(
           googleApiKey,
         }
       );
+      const results = await attachCafeCoordinates(result.results ?? []);
       const payload = {
         answer: result.answer,
+        intro: result.intro ?? null,
         top_n: result.top_n,
-        results: result.results ?? [],
+        results,
         vector_count: result.vector_count,
         bm25_count: result.bm25_count,
         location: result.location ?? null,
@@ -669,4 +693,12 @@ app.listen(PORT, "0.0.0.0", () => {
       adminAuth: isAdminAuthEnabled(),
     })
   );
+  warmupRagWorker().catch((err) => {
+    console.error(
+      JSON.stringify({
+        msg: "rag_worker_warmup_failed",
+        error: err.message || String(err),
+      })
+    );
+  });
 });

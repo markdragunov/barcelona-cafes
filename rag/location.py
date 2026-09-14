@@ -4,66 +4,65 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
 
-from openai import OpenAI
-
-from .neighborhoods import find_neighborhood
-from .paths import CHAT_MODEL
+from .neighborhoods import find_neighborhood, find_neighborhood_in_query, normalize_name
 from .stores.factory import get_repository
 
 RADIUS_KM = 1.0
-LOCATION_PROMPT = """Extract a location reference from the user query about Barcelona coffee shops.
-
-Return JSON only:
-{
-  "location": string or null,
-  "location_type": "street" | "landmark" | "neighborhood" | "area" | null
+_CITY_ONLY = {"barcelona", "bcn", "barna"}
+_PLACE_STOPWORDS = {
+    "the",
+    "a",
+    "an",
+    "my",
+    "this",
+    "that",
+    "local",
+    "guide",
+    "barcelona",
 }
 
-Rules:
-- location should be a geocodable place string (street, landmark, or neighborhood).
-- If the query has no location reference, set location to null.
-- Do not invent a location. City-only mentions like "Barcelona" alone are NOT a specific location — return null unless a more specific place is also present.
-- Keep location concise (e.g. "Gràcia", "Sagrada Familia", "Carrer de Pau Claris")."""
+# Deterministic place phrases: "in Gràcia", "cerca de la Barceloneta", "в Грасии".
+_PLACE_PATTERNS = [
+    re.compile(
+        r"(?i)\b(?:cerca de(?:l| la)?|near(?: the)?|around(?: the)?|"
+        r"in|at|on|en|por)\s+([^,.!?]{2,40})"
+    ),
+    re.compile(r"(?i)\b(?:в|на)\s+([^,.!?]{2,40})"),
+    re.compile(r"在([^，。！？\s]{2,20})"),
+]
 
 
-def extract_location(client: OpenAI, query: str) -> dict[str, Any] | None:
-    resp = client.chat.completions.create(
-        model=CHAT_MODEL,
-        temperature=0,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": LOCATION_PROMPT},
-            {"role": "user", "content": query},
-        ],
-    )
-    raw = (resp.choices[0].message.content or "").strip()
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
+def extract_location(query: str) -> dict[str, Any] | None:
+    """Find a location in the query without calling an LLM."""
+    known = find_neighborhood_in_query(query)
+    if known:
+        return {"location": known["name"], "location_type": "neighborhood"}
 
-    location = data.get("location")
-    if not isinstance(location, str):
-        return None
-    location = location.strip()
-    if not location:
-        return None
+    for pattern in _PLACE_PATTERNS:
+        match = pattern.search(query or "")
+        if not match:
+            continue
+        candidate = re.sub(r"\s+", " ", match.group(1)).strip(" .,-")
+        if not candidate:
+            continue
+        first = normalize_name(candidate).split(" ")[0] if normalize_name(candidate) else ""
+        if first in _PLACE_STOPWORDS:
+            continue
+        if normalize_name(candidate) in _CITY_ONLY:
+            continue
+        nested = find_neighborhood(candidate)
+        if nested:
+            return {"location": nested["name"], "location_type": "neighborhood"}
+        return {"location": candidate, "location_type": "area"}
 
-    # Treat bare city as no specific location filter.
-    if location.lower() in {"barcelona", "bcn", "barna"}:
-        return None
-
-    location_type = data.get("location_type")
-    if location_type not in {"street", "landmark", "neighborhood", "area"}:
-        location_type = None
-
-    return {"location": location, "location_type": location_type}
+    return None
 
 
 def geocode_location(google_api_key: str, location: str) -> dict[str, Any]:
@@ -164,9 +163,7 @@ def resolve_point(google_api_key: str, location: str) -> dict[str, Any]:
     return {**geo, "source": "geocode"}
 
 
-def resolve_location_filter(
-    openai_client: OpenAI, google_api_key: str, query: str
-) -> dict[str, Any]:
+def resolve_location_filter(google_api_key: str, query: str) -> dict[str, Any]:
     """
     Detect location in query and return filter metadata.
     place_ids is None when no location filter should be applied.
@@ -174,7 +171,7 @@ def resolve_location_filter(
     Resolving coordinates is best-effort: if it fails the search still runs,
     unfiltered, with `requested` true and `applied` false.
     """
-    detected = extract_location(openai_client, query)
+    detected = extract_location(query)
     if not detected:
         return {
             "applied": False,

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import gc
 import shutil
+from pathlib import Path
 from typing import Any
 
 import chromadb
@@ -11,6 +13,51 @@ from openai import OpenAI
 from ..bm25_cache import clear_cache, rebuild_from_rows
 from ..paths import COLLECTION_NAME, chroma_dir, data_dir
 from .embeddings import embed_batch
+
+
+def _replace_dir(src: Path, dest: Path) -> None:
+    """Swap dest to src; restore dest if the rename fails."""
+    backup = dest.with_name(dest.name + ".bak")
+    if backup.exists():
+        shutil.rmtree(backup)
+    dest_existed = dest.exists()
+    if dest_existed:
+        dest.rename(backup)
+    try:
+        src.rename(dest)
+    except Exception:
+        if dest_existed and backup.exists() and not dest.exists():
+            backup.rename(dest)
+        raise
+    if backup.exists():
+        shutil.rmtree(backup, ignore_errors=True)
+
+
+def _write_chroma_collection(
+    target: Path, documents: list[dict[str, Any]], embeddings: list[Any]
+) -> None:
+    if target.exists():
+        shutil.rmtree(target)
+    target.mkdir(parents=True, exist_ok=True)
+    chroma = chromadb.PersistentClient(path=str(target))
+    collection = chroma.create_collection(
+        name=COLLECTION_NAME,
+        metadata={"hnsw:space": "cosine"},
+    )
+    ids = [d["place_id"] for d in documents]
+    metadatas = [d["metadata"] for d in documents]
+    texts = [d["document"] for d in documents]
+    batch_size = 100
+    for i in range(0, len(ids), batch_size):
+        collection.add(
+            ids=ids[i : i + batch_size],
+            documents=texts[i : i + batch_size],
+            embeddings=embeddings[i : i + batch_size],
+            metadatas=metadatas[i : i + batch_size],
+        )
+    del collection
+    del chroma
+    gc.collect()
 
 
 class ChromaIndexStore:
@@ -22,30 +69,20 @@ class ChromaIndexStore:
 
         data = data_dir()
         chroma_path = chroma_dir()
+        staging = chroma_path.with_name(chroma_path.name + ".staging")
         data.mkdir(parents=True, exist_ok=True)
-        if chroma_path.exists():
-            shutil.rmtree(chroma_path)
-        chroma_path.mkdir(parents=True, exist_ok=True)
 
         client = OpenAI(api_key=openai_api_key)
         texts = [d["document"] for d in documents]
         embeddings = embed_batch(client, texts)
 
-        chroma = chromadb.PersistentClient(path=str(chroma_path))
-        collection = chroma.create_collection(
-            name=COLLECTION_NAME,
-            metadata={"hnsw:space": "cosine"},
-        )
-        ids = [d["place_id"] for d in documents]
-        metadatas = [d["metadata"] for d in documents]
-        batch_size = 100
-        for i in range(0, len(ids), batch_size):
-            collection.add(
-                ids=ids[i : i + batch_size],
-                documents=texts[i : i + batch_size],
-                embeddings=embeddings[i : i + batch_size],
-                metadatas=metadatas[i : i + batch_size],
-            )
+        try:
+            _write_chroma_collection(staging, documents, embeddings)
+            _replace_dir(staging, chroma_path)
+        except Exception:
+            if staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
+            raise
 
         clear_cache()
         rebuild_from_rows(
