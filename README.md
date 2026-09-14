@@ -200,7 +200,7 @@ Public `POST /api/rag/search` is rate-limited (per client and globally). Answers
 | `data/cafes.db` | Cafes, reviews, `coffee_content` (local SQLite only) |
 | `data/chroma/` | Vector index (local Chroma) |
 
-BM25 is built in memory from the vector store when the RAG worker starts or after a rebuild. Older `data/bm25_index.pkl` files are unused leftovers.
+BM25 lives in the RAG worker process memory and is rebuilt from Chroma or pgvector after indexing.
 
 These paths are gitignored. API keys live in `.env` only — they are not stored in the database.
 
