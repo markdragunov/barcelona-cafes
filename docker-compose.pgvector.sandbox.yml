@@ -1,0 +1,43 @@
+# Standalone sandbox Postgres + pgvector. Own volume, loopback 54330 only.
+# Do not use the production overlay (barcelona-cafes_internal / 54329).
+#
+#   docker compose -f docker-compose.pgvector.sandbox.yml -p barcelona-cafes-sandbox-pg up -d
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: barcelona_cafes
+    command:
+      - postgres
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - max_connections=50
+    ports:
+      - "127.0.0.1:54330:5432"
+    volumes:
+      - pgvector-data:/var/lib/postgresql/data
+      - ./supabase/migrations:/migrations:ro
+      - ./scripts/docker-init-migrations.sh:/docker-entrypoint-initdb.d/10-migrations.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d barcelona_cafes"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+    networks:
+      default:
+      appnet:
+        aliases:
+          - db
+          - sandbox-db
+
+volumes:
+  pgvector-data:
+
+networks:
+  appnet:
+    external: true
+    name: ${APP_NETWORK:-barcelona-cafes-sandbox_internal}

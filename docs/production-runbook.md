@@ -1,14 +1,17 @@
 # Production runbook — Barcelona Cafes
 
-Environments: `local` | `staging` | `production` (same image; different `.env` + data volume).
+Environments: **local** (localhost:3847) | **sandbox** (mark-d.dev, isolated DB) | **production** (topcafes.fyi, current 636-cafe Postgres). Same image; different compose project + `.env` + volume.
+
+Until `topcafes.fyi` has a DNS A record, `mark-d.dev` is still routed to **production** on purpose. Do not run `cutover-sandbox-caddy.sh` before that or the only working public URL will serve an empty sandbox.
 
 ## Phase 0 checklist (before public traffic)
 
 ### Domain & DNS
-- [ ] Register domain (example: `cafes.yourdomain.com`)
-- [ ] Create A record → droplet public IP (current: `164.90.200.60`)
-- [ ] Set `DOMAIN=cafes.yourdomain.com` in production `.env`
-- [ ] Wait for DNS propagation, then confirm Caddy issues TLS
+- [ ] Register domain `topcafes.fyi`
+- [ ] Cloudflare A `@` → `164.90.200.60` (DNS only / grey cloud until TLS works)
+- [ ] Set `DOMAIN=topcafes.fyi` (and after cutover `SANDBOX_DOMAIN=mark-d.dev`) in production `.env`
+- [ ] Wait for DNS, confirm Caddy issues TLS for topcafes.fyi
+- [ ] Supabase Auth Site URL + redirects for all three `/admin` URLs
 
 Without a domain yet, the stack still runs on HTTP at `http://<IP>/` (Caddy listens on 80).
 
@@ -20,7 +23,8 @@ Without a domain yet, the stack still runs on HTTP at `http://<IP>/` (Caddy list
 | `OPENAI_API_KEY` | Embeddings + answers | `.env` |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | Legacy Basic auth fallback | `.env` — prefer magic link (`ADMIN_EMAILS` + Supabase) |
 | `DATA_DIR` | Persistent data path | `/data` in containers |
-| `DOMAIN` | Public hostname for TLS | production `.env` only |
+| `DOMAIN` | Production hostname(s) for TLS | production `.env` |
+| `SANDBOX_DOMAIN` | Sandbox hostname (`mark-d.dev`) after cutover | production `.env` (Caddy only) |
 | `PORT` | Internal app port | `3847` (not exposed publicly) |
 
 Never commit `.env`. Recreate secrets from a password manager on the server.
@@ -51,8 +55,9 @@ Set billing alerts on all three clouds before launch.
 
 ```bash
 # On laptop (from repo root)
-./deploy/remote-setup.sh          # install Docker on droplet if needed
-./deploy/sync-and-up.sh           # build/up stack + optional data sync
+./deploy/remote-setup.sh
+SYNC_DATA=0 TARGET=prod ./deploy/sync-and-up.sh
+SYNC_DATA=0 TARGET=sandbox ./deploy/sync-and-up.sh
 
 # Backups on server
 ./deploy/backup-data.sh

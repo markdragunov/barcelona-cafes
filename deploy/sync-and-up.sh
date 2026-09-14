@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Sync repo (+ data) to droplet and bring Docker Compose stack up.
+# Sync repo to droplet and bring up prod and/or sandbox compose stacks.
+# Never copies local data/ onto the server unless you set SYNC_DATA=1.
 set -euo pipefail
 
 REMOTE="${REMOTE:-root@164.90.200.60}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/do_ed25519}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SYNC_DATA="${SYNC_DATA:-1}"
+# Default 0: live Postgres/volume must not be replaced by an empty laptop data/.
+SYNC_DATA="${SYNC_DATA:-0}"
+# prod | sandbox | both
+TARGET="${TARGET:-prod}"
 SSH=(ssh -i "$SSH_KEY" -o BatchMode=yes)
 RSYNC=(rsync -az --delete -e "ssh -i ${SSH_KEY} -o BatchMode=yes")
 
@@ -20,18 +24,36 @@ if ! grep -qE '^ADMIN_PASSWORD=.+' .env; then
   exit 1
 fi
 
-"${SSH[@]}" "$REMOTE" 'mkdir -p /opt/barcelona-cafes /var/lib/barcelona-cafes-data /opt/barcelona-cafes/backups'
+sync_code() {
+  local dest="$1"
+  "${SSH[@]}" "$REMOTE" "mkdir -p ${dest} ${dest}/backups /var/lib/barcelona-cafes-data"
+  "${RSYNC[@]}" \
+    --exclude node_modules \
+    --exclude .git \
+    --exclude .venv \
+    --exclude data \
+    --exclude backups \
+    --exclude .env \
+    --exclude .cursor \
+    "$ROOT/" "$REMOTE:${dest}/"
+}
 
-"${RSYNC[@]}" \
-  --exclude node_modules \
-  --exclude .git \
-  --exclude .venv \
-  --exclude data \
-  --exclude backups \
-  --exclude .env \
-  "$ROOT/" "$REMOTE:/opt/barcelona-cafes/"
+case "$TARGET" in
+  prod|sandbox|both) ;;
+  *)
+    echo "TARGET must be prod, sandbox, or both (got $TARGET)" >&2
+    exit 1
+    ;;
+esac
 
-scp -i "$SSH_KEY" -o BatchMode=yes "$ROOT/.env" "$REMOTE:/opt/barcelona-cafes/.env"
+if [[ "$TARGET" == "prod" || "$TARGET" == "both" ]]; then
+  sync_code /opt/barcelona-cafes
+  scp -i "$SSH_KEY" -o BatchMode=yes "$ROOT/.env" "$REMOTE:/opt/barcelona-cafes/.env"
+fi
+
+if [[ "$TARGET" == "sandbox" || "$TARGET" == "both" ]]; then
+  sync_code /opt/barcelona-cafes-sandbox
+fi
 
 if [[ "$SYNC_DATA" == "1" ]]; then
   if [[ -z "${DATA_SRC:-}" ]]; then
@@ -57,7 +79,8 @@ PY
   "${RSYNC[@]}" "$STAGE/" "$REMOTE:/var/lib/barcelona-cafes-data/"
 fi
 
-"${SSH[@]}" "$REMOTE" bash -s <<'REMOTE'
+if [[ "$TARGET" == "prod" || "$TARGET" == "both" ]]; then
+  "${SSH[@]}" "$REMOTE" env SYNC_DATA="$SYNC_DATA" bash -s <<'REMOTE'
 set -euo pipefail
 cd /opt/barcelona-cafes
 chmod +x deploy/*.sh
@@ -65,27 +88,35 @@ chmod +x deploy/*.sh
 docker compose build
 docker compose up -d
 
-# Seed / refresh named volume from host seed directory
-if [[ -f /var/lib/barcelona-cafes-data/cafes.db ]]; then
+# Only replace the sqlite volume when the operator opted into SYNC_DATA=1.
+if [[ "${SYNC_DATA:-0}" == "1" && -f /var/lib/barcelona-cafes-data/cafes.db ]]; then
   docker compose stop app
-  VOL=$(docker volume ls -q --filter name=cafes-data | head -1)
+  VOL=$(docker volume ls -q --filter name=barcelona-cafes_cafes-data | head -1)
   docker run --rm -v "${VOL}:/data" -v /var/lib/barcelona-cafes-data:/seed:ro alpine \
     sh -c 'rm -rf /data/cafes.db /data/cafes.db-* /data/chroma /data/bm25_index.pkl 2>/dev/null || true; cp -a /seed/. /data/; chown -R 1000:1000 /data; chmod -R u+rwX /data; ls -la /data'
   docker compose start app
 fi
 
-# Nightly volume backup
 CRON_DOCKER="15 3 * * * /opt/barcelona-cafes/deploy/backup-volume.sh >> /var/log/barcelona-backup.log 2>&1"
 (crontab -l 2>/dev/null | grep -v backup-volume | grep -v barcelona-backup || true; echo "$CRON_DOCKER") | crontab -
 
 sleep 4
 docker compose ps
-curl -sf http://127.0.0.1/api/health
-echo
-curl -sS http://127.0.0.1/api/ready || true
-echo
+curl -sf -o /tmp/health.json http://127.0.0.1/api/health || curl -sf https://mark-d.dev/api/health >/dev/null
+echo "prod health ok"
 REMOTE
+fi
 
-echo "Deploy finished."
-echo "  Public: http://164.90.200.60/"
-echo "  Admin:  http://164.90.200.60/admin"
+if [[ "$TARGET" == "sandbox" || "$TARGET" == "both" ]]; then
+  "${SSH[@]}" "$REMOTE" bash -s <<'REMOTE'
+set -euo pipefail
+chmod +x /opt/barcelona-cafes-sandbox/deploy/*.sh /opt/barcelona-cafes/deploy/provision-sandbox.sh
+/opt/barcelona-cafes-sandbox/deploy/provision-sandbox.sh
+REMOTE
+fi
+
+echo "Deploy finished (TARGET=${TARGET} SYNC_DATA=${SYNC_DATA})."
+echo "  Production (after DNS): https://topcafes.fyi/"
+echo "  Sandbox (after Caddy cutover): https://mark-d.dev/"
+echo "  Local: http://localhost:3847/"
+echo "Caddy still routes mark-d.dev to production until SANDBOX_DOMAIN=mark-d.dev is set on the prod stack."
