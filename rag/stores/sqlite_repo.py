@@ -74,19 +74,27 @@ class SqliteCafeRepository:
         finally:
             conn.close()
 
-    def list_cafe_coordinates(self) -> list[dict[str, Any]]:
+    def list_cafe_coordinates(
+        self,
+        south: float | None = None,
+        north: float | None = None,
+        west: float | None = None,
+        east: float | None = None,
+    ) -> list[dict[str, Any]]:
         conn = self._connect()
         conn.row_factory = sqlite3.Row
         try:
-            return [
-                dict(r)
-                for r in conn.execute(
-                    """
-                    SELECT place_id, latitude, longitude FROM cafes
-                    WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-                    """
+            sql = """
+                SELECT place_id, latitude, longitude FROM cafes
+                WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+            """
+            params: list[Any] = []
+            if None not in (south, north, west, east):
+                sql += (
+                    " AND latitude BETWEEN ? AND ? AND longitude BETWEEN ? AND ?"
                 )
-            ]
+                params = [south, north, west, east]
+            return [dict(r) for r in conn.execute(sql, params)]
         finally:
             conn.close()
 

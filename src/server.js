@@ -3,7 +3,7 @@ import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  getApiKey,
+  getGoogleApiKey,
   getParallelApiKey,
   getOpenAiApiKey,
   getDataDir,
@@ -14,6 +14,7 @@ import {
   getSearchRateLimitWindowMs,
   getSearchRateLimitMax,
   getSearchGlobalRateLimitMax,
+  getSearchDailyGlobalMax,
   getSearchMaxQueryChars,
   getSearchCacheTtlMs,
   getSearchCacheMaxEntries,
@@ -34,24 +35,29 @@ import {
 import { collectCafes } from "./places.js";
 import { extractCoffeeContent } from "./extract.js";
 import { SEARCH_QUERIES } from "./queries.js";
-import { runRag, warmupRagWorker } from "./ragBridge.js";
+import { runRag, warmupRagWorker, shutdownRagWorker } from "./ragBridge.js";
 import {
   requireAdmin,
   rateLimit,
   globalRateLimit,
   validateSearchQuery,
   requestLog,
+  securityHeaders,
 } from "./middleware.js";
 import { createSearchCache, searchCacheKey } from "./searchCache.js";
+import { publicSearchError } from "./searchErrors.js";
+import { acceptAndRun, finishJob, persistJobRecord, pushJobLog } from "./jobs.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
 const PUBLIC = path.join(ROOT, "public");
 const app = express();
 const PORT = process.env.PORT || 3847;
+let shuttingDown = false;
 
 app.set("trust proxy", 1);
 app.use(requestLog);
+app.use(securityHeaders);
 app.use(express.json({ limit: "2mb" }));
 
 /** Public routes stay open; admin ops APIs require auth. */
@@ -124,6 +130,10 @@ const searchGlobalRateLimit = globalRateLimit({
   windowMs: SEARCH_WINDOW_MS,
   max: getSearchGlobalRateLimitMax(),
 });
+const searchDailyLimit = globalRateLimit({
+  windowMs: 86_400_000,
+  max: getSearchDailyGlobalMax(),
+});
 const searchQueryGuard = validateSearchQuery({
   maxChars: getSearchMaxQueryChars(),
 });
@@ -180,10 +190,15 @@ app.get("/api/ready", async (_req, res) => {
     };
     res.status(ready ? 200 : 503).json(payload);
   } catch (err) {
+    console.error(
+      JSON.stringify({
+        msg: "ready_failed",
+        error: err.message || String(err),
+      })
+    );
     res.status(503).json({
       ready: false,
-      error: err.message || String(err),
-      dataDir: getDataDir(),
+      error: "Not ready",
     });
   }
 });
@@ -199,7 +214,7 @@ app.get("/api/neighborhoods", (_req, res) => {
 });
 
 app.get("/api/settings/api-key", (_req, res) => {
-  const key = getApiKey();
+  const key = getGoogleApiKey();
   res.json({
     configured: Boolean(key),
     masked: maskKey(key),
@@ -320,11 +335,14 @@ app.get("/api/collect/status", (_req, res) => {
 });
 
 app.post("/api/collect", async (req, res) => {
+  if (shuttingDown) {
+    return res.status(503).json({ error: "Server is shutting down" });
+  }
   if (collectionJob?.running) {
     return res.status(409).json({ error: "Collection already running" });
   }
 
-  const apiKey = getApiKey();
+  const apiKey = getGoogleApiKey();
   if (!apiKey) {
     return res.status(400).json({ error: "Set GOOGLE_PLACES_API_KEY in .env first" });
   }
@@ -351,44 +369,42 @@ app.post("/api/collect", async (req, res) => {
     controller,
   };
 
-  const pushLog = (entry) => {
-    collectionJob.logs.push({
-      at: new Date().toISOString(),
-      ...entry,
-    });
-    if (collectionJob.logs.length > 500) {
-      collectionJob.logs = collectionJob.logs.slice(-400);
+  acceptAndRun(
+    res,
+    {
+      ok: true,
+      message: "Collection started",
+      neighborhoodId,
+      neighborhoods: neighborhoods.map((n) => n.name),
+      queryCount: SEARCH_QUERIES.length,
+    },
+    async () => {
+      try {
+        const result = await collectCafes({
+          apiKey,
+          neighborhoods,
+          signal: controller.signal,
+          onProgress: (event) => pushJobLog(collectionJob, event),
+        });
+        finishJob(collectionJob, { result });
+        pushJobLog(collectionJob, {
+          stage: "done",
+          message:
+            `Done. Unique places ${result.uniquePlaces}, ` +
+            `created ${result.created}, updated ${result.updated} ` +
+            `(raw hits ${result.found}).`,
+        });
+        await persistJobRecord("collect", collectionJob);
+      } catch (err) {
+        finishJob(collectionJob, { error: err });
+        pushJobLog(collectionJob, {
+          stage: "error",
+          message: collectionJob.error,
+        });
+        await persistJobRecord("collect", collectionJob);
+      }
     }
-  };
-
-  res.status(202).json({
-    ok: true,
-    message: "Collection started",
-    neighborhoodId,
-    neighborhoods: neighborhoods.map((n) => n.name),
-    queryCount: SEARCH_QUERIES.length,
-  });
-
-  try {
-    const result = await collectCafes({
-      apiKey,
-      neighborhoods,
-      signal: controller.signal,
-      onProgress: (event) => pushLog(event),
-    });
-    collectionJob.result = result;
-    collectionJob.running = false;
-    collectionJob.finishedAt = new Date().toISOString();
-    pushLog({
-      stage: "done",
-      message: `Done. Found ${result.found} places, upserted ${result.saved} cafe records.`,
-    });
-  } catch (err) {
-    collectionJob.error = err.message || String(err);
-    collectionJob.running = false;
-    collectionJob.finishedAt = new Date().toISOString();
-    pushLog({ stage: "error", message: collectionJob.error });
-  }
+  );
 });
 
 app.post("/api/collect/cancel", (_req, res) => {
@@ -423,6 +439,9 @@ app.get("/api/coffee-content/status", (_req, res) => {
 });
 
 app.post("/api/coffee-content/fetch", async (req, res) => {
+  if (shuttingDown) {
+    return res.status(503).json({ error: "Server is shutting down" });
+  }
   if (coffeeJob?.running) {
     return res.status(409).json({ error: "Coffee content fetch already running" });
   }
@@ -458,76 +477,69 @@ app.post("/api/coffee-content/fetch", async (req, res) => {
     controller,
   };
 
-  const pushLog = (entry) => {
-    coffeeJob.logs.push({
-      at: new Date().toISOString(),
-      ...entry,
-    });
-    if (coffeeJob.logs.length > 500) {
-      coffeeJob.logs = coffeeJob.logs.slice(-400);
-    }
-  };
-
-  res.status(202).json({
-    ok: true,
-    message: "Coffee content fetch started",
-    total: toProcess.length,
-    skipped,
-  });
-
-  pushLog({
-    stage: "start",
-    message: `Processing ${toProcess.length} cafe(s); skipped ${skipped} already filled.`,
-  });
-
-  try {
-    for (const cafe of toProcess) {
-      if (controller.signal.aborted) {
-        throw new Error("Coffee content fetch cancelled");
-      }
-
-      coffeeJob.current = { place_id: cafe.place_id, name: cafe.name };
-      pushLog({
-        stage: "cafe",
-        message: `Extracting: ${cafe.name}`,
-        place_id: cafe.place_id,
+  acceptAndRun(
+    res,
+    {
+      ok: true,
+      message: "Coffee content fetch started",
+      total: toProcess.length,
+      skipped,
+    },
+    async () => {
+      pushJobLog(coffeeJob, {
+        stage: "start",
+        message: `Processing ${toProcess.length} cafe(s); skipped ${skipped} already filled.`,
       });
 
       try {
-        const content = await extractCoffeeContent(apiKey, cafe.website);
-        await updateCoffeeContent(cafe.place_id, content);
-        coffeeJob.completed += 1;
-        pushLog({
-          stage: "saved",
-          message: `Saved coffee content for ${cafe.name}`,
-          place_id: cafe.place_id,
+        for (const cafe of toProcess) {
+          if (controller.signal.aborted) {
+            throw new Error("Coffee content fetch cancelled");
+          }
+
+          coffeeJob.current = { place_id: cafe.place_id, name: cafe.name };
+          pushJobLog(coffeeJob, {
+            stage: "cafe",
+            message: `Extracting: ${cafe.name}`,
+            place_id: cafe.place_id,
+          });
+
+          try {
+            const content = await extractCoffeeContent(apiKey, cafe.website);
+            await updateCoffeeContent(cafe.place_id, content);
+            coffeeJob.completed += 1;
+            pushJobLog(coffeeJob, {
+              stage: "saved",
+              message: `Saved coffee content for ${cafe.name}`,
+              place_id: cafe.place_id,
+            });
+          } catch (err) {
+            coffeeJob.failed += 1;
+            pushJobLog(coffeeJob, {
+              stage: "error",
+              message: `Failed ${cafe.name}: ${err.message || String(err)}`,
+              place_id: cafe.place_id,
+            });
+          }
+
+          await new Promise((r) => setTimeout(r, 200));
+        }
+
+        coffeeJob.current = null;
+        finishJob(coffeeJob);
+        pushJobLog(coffeeJob, {
+          stage: "done",
+          message: `Done. Completed ${coffeeJob.completed}/${coffeeJob.total}; skipped ${coffeeJob.skipped}; failed ${coffeeJob.failed}.`,
         });
+        await persistJobRecord("coffee-content", coffeeJob);
       } catch (err) {
-        coffeeJob.failed += 1;
-        pushLog({
-          stage: "error",
-          message: `Failed ${cafe.name}: ${err.message || String(err)}`,
-          place_id: cafe.place_id,
-        });
+        coffeeJob.current = null;
+        finishJob(coffeeJob, { error: err });
+        pushJobLog(coffeeJob, { stage: "error", message: coffeeJob.error });
+        await persistJobRecord("coffee-content", coffeeJob);
       }
-
-      await new Promise((r) => setTimeout(r, 200));
     }
-
-    coffeeJob.running = false;
-    coffeeJob.finishedAt = new Date().toISOString();
-    coffeeJob.current = null;
-    pushLog({
-      stage: "done",
-      message: `Done. Completed ${coffeeJob.completed}/${coffeeJob.total}; skipped ${coffeeJob.skipped}; failed ${coffeeJob.failed}.`,
-    });
-  } catch (err) {
-    coffeeJob.error = err.message || String(err);
-    coffeeJob.running = false;
-    coffeeJob.finishedAt = new Date().toISOString();
-    coffeeJob.current = null;
-    pushLog({ stage: "error", message: coffeeJob.error });
-  }
+  );
 });
 
 app.post("/api/coffee-content/cancel", (_req, res) => {
@@ -567,6 +579,9 @@ app.get("/api/rag/index/status", (_req, res) => {
 });
 
 app.post("/api/rag/index", async (_req, res) => {
+  if (shuttingDown) {
+    return res.status(503).json({ error: "Server is shutting down" });
+  }
   if (indexJob?.running) {
     return res.status(409).json({ error: "Indexing already running" });
   }
@@ -584,25 +599,26 @@ app.post("/api/rag/index", async (_req, res) => {
     result: null,
   };
 
-  res.status(202).json({ ok: true, message: "Indexing started" });
-
-  try {
-    const result = await runRag(["index"], {
-      timeoutMs: 900_000,
-      openaiApiKey: apiKey,
-    });
-    indexJob.result = {
-      indexed: result.indexed,
-      chroma_path: result.chroma_path,
-      bm25_path: result.bm25_path,
-    };
-    indexJob.running = false;
-    indexJob.finishedAt = new Date().toISOString();
-  } catch (err) {
-    indexJob.error = err.message || String(err);
-    indexJob.running = false;
-    indexJob.finishedAt = new Date().toISOString();
-  }
+  acceptAndRun(res, { ok: true, message: "Indexing started" }, async () => {
+    try {
+      const result = await runRag(["index"], {
+        timeoutMs: 900_000,
+        openaiApiKey: apiKey,
+      });
+      finishJob(indexJob, {
+        result: {
+          indexed: result.indexed,
+          embedded: result.embedded,
+          chroma_path: result.chroma_path,
+          bm25_path: result.bm25_path,
+        },
+      });
+      await persistJobRecord("rag-index", indexJob);
+    } catch (err) {
+      finishJob(indexJob, { error: err });
+      await persistJobRecord("rag-index", indexJob);
+    }
+  });
 });
 
 async function attachCafeCoordinates(results) {
@@ -628,6 +644,7 @@ async function attachCafeCoordinates(results) {
 
 app.post(
   "/api/rag/search",
+  searchDailyLimit,
   searchGlobalRateLimit,
   searchRateLimit,
   searchQueryGuard,
@@ -637,7 +654,7 @@ app.post(
       return res.status(400).json({ error: "Set OPENAI_API_KEY in .env first" });
     }
 
-    const googleApiKey = getApiKey();
+    const googleApiKey = getGoogleApiKey();
     if (!googleApiKey) {
       return res.status(400).json({
         error:
@@ -657,6 +674,7 @@ app.post(
       return res.json({ ...cached, cached: true });
     }
 
+    const started = Date.now();
     try {
       const result = await runRag(
         ["search", "--query", query, "--top-n", String(topN)],
@@ -677,14 +695,33 @@ app.post(
         location: result.location ?? null,
       };
       searchCache.set(cacheKey, payload);
+      console.log(
+        JSON.stringify({
+          msg: "search_ok",
+          requestId: req.requestId,
+          topN,
+          results: results.length,
+          locationApplied: Boolean(payload.location?.applied),
+          radiusKm: payload.location?.radius_km ?? null,
+          durationMs: Date.now() - started,
+        })
+      );
       res.json(payload);
     } catch (err) {
-      res.status(500).json({ error: err.message || String(err) });
+      const mapped = publicSearchError(err, req.requestId);
+      console.error(
+        JSON.stringify({
+          msg: "search_failed",
+          requestId: req.requestId,
+          error: mapped.detail,
+        })
+      );
+      res.status(mapped.status).json(mapped.body);
     }
   }
 );
 
-app.listen(PORT, "0.0.0.0", () => {
+const server = app.listen(PORT, "0.0.0.0", () => {
   console.log(
     JSON.stringify({
       msg: "server_listen",
@@ -702,3 +739,29 @@ app.listen(PORT, "0.0.0.0", () => {
     );
   });
 });
+
+function abortJobs() {
+  try {
+    collectionJob?.controller?.abort();
+  } catch {
+    // ignore
+  }
+  try {
+    coffeeJob?.controller?.abort();
+  } catch {
+    // ignore
+  }
+}
+
+function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(JSON.stringify({ msg: "shutdown", signal }));
+  abortJobs();
+  shutdownRagWorker();
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 10_000).unref();
+}
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));

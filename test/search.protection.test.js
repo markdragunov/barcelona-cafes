@@ -8,6 +8,7 @@ import {
   rateLimit,
   globalRateLimit,
   validateSearchQuery,
+  securityHeaders,
 } from "../src/middleware.js";
 import { createSearchCache, searchCacheKey } from "../src/searchCache.js";
 
@@ -22,6 +23,10 @@ function mockRes() {
     },
     json(payload) {
       this.body = payload;
+      return this;
+    },
+    setHeader(name, value) {
+      this.headers[String(name).toLowerCase()] = value;
       return this;
     },
     set(name, value) {
@@ -183,6 +188,25 @@ describe("search response cache", () => {
     assert.equal(cache.enabled, false);
     assert.equal(cache.get("k"), null);
     assert.equal(cache.size, 0);
+  });
+});
+
+describe("security headers", () => {
+  it("sets CSP and nosniff, and HSTS only behind https", () => {
+    const httpReq = { headers: {} };
+    const httpRes = mockRes();
+    securityHeaders(httpReq, httpRes, () => {});
+    assert.equal(httpRes.headers["x-content-type-options"], "nosniff");
+    assert.match(httpRes.headers["content-security-policy"], /default-src 'self'/);
+    assert.equal(httpRes.headers["strict-transport-security"], undefined);
+
+    const httpsRes = mockRes();
+    securityHeaders(
+      { headers: { "x-forwarded-proto": "https" } },
+      httpsRes,
+      () => {}
+    );
+    assert.match(httpsRes.headers["strict-transport-security"], /max-age=31536000/);
   });
 });
 

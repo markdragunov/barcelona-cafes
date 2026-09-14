@@ -11,6 +11,12 @@ emit_site() {
   cat <<EOF
 ${host} {
 	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+	}
 	reverse_proxy ${upstream}
 }
 

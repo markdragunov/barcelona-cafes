@@ -1,4 +1,4 @@
-"""Location detection, Google Geocoding, and 1 km cafe radius filter."""
+"""Location detection, Google Geocoding, and cafe radius filter."""
 
 from __future__ import annotations
 
@@ -11,10 +11,17 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from .neighborhoods import find_neighborhood, find_neighborhood_in_query, normalize_name
+from .neighborhoods import (
+    find_landmark,
+    find_landmark_in_query,
+    find_neighborhood,
+    find_neighborhood_in_query,
+    normalize_name,
+)
 from .stores.factory import get_repository
 
 RADIUS_KM = 1.0
+RADIUS_STEPS_KM = (1.0, 2.0, 3.0)
 _CITY_ONLY = {"barcelona", "bcn", "barna"}
 _PLACE_STOPWORDS = {
     "the",
@@ -45,6 +52,10 @@ def extract_location(query: str) -> dict[str, Any] | None:
     if known:
         return {"location": known["name"], "location_type": "neighborhood"}
 
+    landmark = find_landmark_in_query(query)
+    if landmark:
+        return {"location": landmark["name"], "location_type": "landmark"}
+
     for pattern in _PLACE_PATTERNS:
         match = pattern.search(query or "")
         if not match:
@@ -60,6 +71,9 @@ def extract_location(query: str) -> dict[str, Any] | None:
         nested = find_neighborhood(candidate)
         if nested:
             return {"location": nested["name"], "location_type": "neighborhood"}
+        nested_landmark = find_landmark(candidate)
+        if nested_landmark:
+            return {"location": nested_landmark["name"], "location_type": "landmark"}
         return {"location": candidate, "location_type": "area"}
 
     return None
@@ -120,10 +134,20 @@ def cafes_within_radius(
     latitude: float, longitude: float, radius_km: float = RADIUS_KM
 ) -> list[str]:
     """Return place_ids of cafes within radius_km of the point."""
-    rows = get_repository().list_cafe_coordinates()
-
     lat_delta = radius_km / 111.0
     lon_delta = radius_km / max(0.01, 111.0 * math.cos(math.radians(latitude)))
+    south = latitude - lat_delta
+    north = latitude + lat_delta
+    west = longitude - lon_delta
+    east = longitude + lon_delta
+
+    repo = get_repository()
+    try:
+        rows = repo.list_cafe_coordinates(
+            south=south, north=north, west=west, east=east
+        )
+    except TypeError:
+        rows = repo.list_cafe_coordinates()
 
     matched: list[str] = []
     for row in rows:
@@ -146,10 +170,10 @@ def resolve_point(google_api_key: str, location: str) -> dict[str, Any]:
     """
     Resolve a location string to coordinates.
 
-    Known neighborhoods come from the shared gazetteer with no network call;
-    everything else falls back to the Google Geocoding API.
+    Known neighborhoods and landmarks come from the shared gazetteer with no
+    network call; everything else falls back to the Google Geocoding API.
     """
-    known = find_neighborhood(location)
+    known = find_neighborhood(location) or find_landmark(location)
     if known:
         return {
             "latitude": known["centroid"]["latitude"],
@@ -209,7 +233,44 @@ def resolve_location_filter(google_api_key: str, query: str) -> dict[str, Any]:
             "error": str(err),
         }
 
-    place_ids = cafes_within_radius(point["latitude"], point["longitude"], RADIUS_KM)
+    place_ids: list[str] = []
+    used_radius = RADIUS_STEPS_KM[0]
+    for radius in RADIUS_STEPS_KM:
+        place_ids = cafes_within_radius(
+            point["latitude"], point["longitude"], radius
+        )
+        used_radius = radius
+        if place_ids:
+            break
+
+    if not place_ids:
+        return {
+            "applied": False,
+            "requested": True,
+            "location": location,
+            "location_type": detected.get("location_type"),
+            "coordinates": {
+                "latitude": point["latitude"],
+                "longitude": point["longitude"],
+                "formatted_address": point["formatted_address"],
+            },
+            "radius_km": used_radius,
+            "place_ids": None,
+            "cafe_count": 0,
+            "source": point["source"],
+            "notice": (
+                f"Couldn't find cafes near '{location}', "
+                "so these results cover all of Barcelona."
+            ),
+        }
+
+    notice = None
+    if used_radius > RADIUS_STEPS_KM[0]:
+        notice = (
+            f"Nothing within 1 km of {location}; "
+            f"showing cafes within {used_radius:g} km."
+        )
+
     return {
         "applied": True,
         "requested": True,
@@ -220,9 +281,9 @@ def resolve_location_filter(google_api_key: str, query: str) -> dict[str, Any]:
             "longitude": point["longitude"],
             "formatted_address": point["formatted_address"],
         },
-        "radius_km": RADIUS_KM,
+        "radius_km": used_radius,
         "place_ids": place_ids,
         "cafe_count": len(place_ids),
         "source": point["source"],
-        "notice": None,
+        "notice": notice,
     }

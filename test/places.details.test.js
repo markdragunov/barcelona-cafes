@@ -2,7 +2,11 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { searchResultHasCoordinates, shouldFetchPlaceDetails } from "../src/places.js";
+import {
+  searchResultHasCoordinates,
+  shouldFetchPlaceDetails,
+  isOperationalPlace,
+} from "../src/places.js";
 
 const place = {
   id: "places/ChIJabc",
@@ -24,5 +28,11 @@ describe("Places details skip", () => {
   it("fetches details only when a new place has no coordinates", () => {
     const incomplete = { id: "places/ChIJnew", location: {} };
     assert.equal(shouldFetchPlaceDetails(incomplete, new Set()), true);
+  });
+
+  it("treats missing businessStatus as operational", () => {
+    assert.equal(isOperationalPlace({}), true);
+    assert.equal(isOperationalPlace({ businessStatus: "OPERATIONAL" }), true);
+    assert.equal(isOperationalPlace({ businessStatus: "CLOSED_PERMANENTLY" }), false);
   });
 });

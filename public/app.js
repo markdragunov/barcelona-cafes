@@ -355,6 +355,21 @@ indexCafesBtn?.addEventListener("click", async () => {
   }
 });
 
+function formatRagAnswer(data) {
+  const intro = String(data?.intro || "").trim();
+  const rows = Array.isArray(data?.results)
+    ? data.results
+        .map((row) => {
+          const name = row?.name || "Cafe";
+          const why = String(row?.why || "").trim();
+          return why ? `${name} — ${why}` : name;
+        })
+        .filter(Boolean)
+    : [];
+  const structured = [intro, ...rows].filter(Boolean).join("\n\n");
+  return structured || data?.answer || "";
+}
+
 ragSearchForm?.addEventListener("submit", async (ev) => {
   ev.preventDefault();
   try {
@@ -368,7 +383,7 @@ ragSearchForm?.addEventListener("submit", async (ev) => {
         topN: Number(ragTopN.value) || 5,
       }),
     });
-    ragAnswerText.textContent = data.answer || "";
+    ragAnswerText.textContent = formatRagAnswer(data);
     ragAnswer.hidden = false;
     setStatus(ragSearchStatus, "Done.", "ok");
   } catch (err) {

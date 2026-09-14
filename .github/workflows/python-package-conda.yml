@@ -31,12 +31,21 @@ jobs:
         fi
         # stop the build if there are Python syntax errors or undefined names
         flake8 "${LINT_PATHS[@]}" --count --select=E9,F63,F7,F821,F822,F823 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        # Style/complexity stay advisory so a long line cannot hide a syntax error.
         flake8 "${LINT_PATHS[@]}" --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Test with unittest
       run: |
-        if [ -d tests ]; then
-          python -m unittest discover -s tests -v
-        else
-          echo "No Python tests directory; skipping unittest"
-        fi
+        python -m unittest discover -s tests -v
+
+  node:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+    - name: Install Node dependencies
+      run: npm ci
+    - name: Test with node --test
+      run: npm test

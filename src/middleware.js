@@ -250,6 +250,41 @@ export function validateSearchQuery({ maxChars = 300 } = {}) {
   };
 }
 
+export function securityHeaders(req, res, next) {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "0");
+  res.setHeader(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=()"
+  );
+  res.setHeader(
+    "Content-Security-Policy",
+    [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com",
+      "font-src 'self' https://fonts.gstatic.com",
+      "img-src 'self' data: https://*.basemaps.cartocdn.com https://*.cartocdn.com",
+      "connect-src 'self' https://*.supabase.co",
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join("; ")
+  );
+  const proto = String(req.headers["x-forwarded-proto"] || "")
+    .split(",")[0]
+    .trim();
+  if (proto === "https") {
+    res.setHeader(
+      "Strict-Transport-Security",
+      "max-age=31536000; includeSubDomains"
+    );
+  }
+  next();
+}
+
 export function requestLog(req, res, next) {
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   req.requestId = id;

@@ -1,5 +1,6 @@
 import { SEARCH_QUERIES } from "./queries.js";
 import { upsertCafeWithReviews, listKnownPlaceIds } from "./db.js";
+import { formatFetchError } from "./http.js";
 
 const TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText";
 const PLACE_DETAILS_URL = "https://places.googleapis.com/v1/places";
@@ -14,6 +15,7 @@ const SEARCH_FIELD_MASK = [
   "places.types",
   "places.location",
   "places.reviews",
+  "places.businessStatus",
   "nextPageToken",
 ].join(",");
 
@@ -27,6 +29,7 @@ const DETAILS_FIELD_MASK = [
   "types",
   "location",
   "reviews",
+  "businessStatus",
 ].join(",");
 
 function normalizePlaceId(id) {
@@ -86,19 +89,22 @@ export function shouldFetchPlaceDetails(place, knownPlaceIds = new Set()) {
   return true;
 }
 
+export function isOperationalPlace(place) {
+  const status = place?.businessStatus;
+  if (!status) return true;
+  return status === "OPERATIONAL";
+}
+
 async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function formatFetchError(err) {
-  const cause = err?.cause;
-  if (cause?.code === "ENOTFOUND") {
-    return `Network/DNS failed reaching Places API (${cause.hostname}). Check internet access and restart the server outside a restricted environment.`;
+function formatPlacesFetchError(err) {
+  const message = formatFetchError(err, "Places API");
+  if (err?.cause?.code === "ENOTFOUND") {
+    return `${message} Check internet access and restart the server outside a restricted environment.`;
   }
-  if (cause?.code === "ECONNREFUSED" || cause?.code === "ETIMEDOUT") {
-    return `Network error talking to Places API (${cause.code}).`;
-  }
-  return cause?.message || err?.message || String(err);
+  return message;
 }
 
 async function placesFetch(url, { apiKey, method = "GET", body, fieldMask }) {
@@ -116,7 +122,7 @@ async function placesFetch(url, { apiKey, method = "GET", body, fieldMask }) {
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch (err) {
-    throw new Error(formatFetchError(err));
+    throw new Error(formatPlacesFetchError(err));
   }
 
   const text = await response.text();
@@ -180,8 +186,13 @@ async function collectForQuery(
   let pages = 0;
   let found = 0;
   let saved = 0;
+  let created = 0;
+  let updated = 0;
   let skippedDuplicate = 0;
+  let skippedClosed = 0;
   let detailsCalls = 0;
+  let detailsAttempts = 0;
+  let detailsFallbacks = 0;
 
   do {
     const data = await searchTextPage(
@@ -196,6 +207,10 @@ async function collectForQuery(
     for (const place of places) {
       found += 1;
       if (!hasCafeType(place.types)) continue;
+      if (!isOperationalPlace(place)) {
+        skippedClosed += 1;
+        continue;
+      }
 
       const placeId = normalizePlaceId(place.id);
       if (!placeId) continue;
@@ -205,14 +220,28 @@ async function collectForQuery(
       }
       seenPlaceIds.add(placeId);
 
+      const wasKnown = knownPlaceIds.has(placeId);
       let enriched = place;
       if (shouldFetchPlaceDetails(place, knownPlaceIds)) {
+        detailsAttempts += 1;
         try {
           enriched = await fetchPlaceDetails(apiKey, placeId);
           detailsCalls += 1;
           if (!hasCafeType(enriched.types)) continue;
+          if (!isOperationalPlace(enriched)) {
+            skippedClosed += 1;
+            continue;
+          }
           await sleep(50);
-        } catch {
+        } catch (err) {
+          detailsFallbacks += 1;
+          console.error(
+            JSON.stringify({
+              msg: "place_details_fallback",
+              placeId,
+              error: err?.message || String(err),
+            })
+          );
           enriched = place;
         }
       }
@@ -222,6 +251,8 @@ async function collectForQuery(
       await upsertCafeWithReviews(cafe, reviews);
       knownPlaceIds.add(placeId);
       saved += 1;
+      if (wasKnown) updated += 1;
+      else created += 1;
     }
 
     pageToken = data.nextPageToken ?? null;
@@ -235,11 +266,27 @@ async function collectForQuery(
       found,
       saved,
       skippedDuplicate,
+      skippedClosed,
       detailsCalls,
+      detailsAttempts,
+      detailsFallbacks,
+      created,
+      updated,
     });
   } while (pageToken);
 
-  return { found, saved, pages, skippedDuplicate, detailsCalls };
+  return {
+    found,
+    saved,
+    created,
+    updated,
+    pages,
+    skippedDuplicate,
+    skippedClosed,
+    detailsCalls,
+    detailsAttempts,
+    detailsFallbacks,
+  };
 }
 
 /**
@@ -260,7 +307,13 @@ export async function collectCafes({
     saved: 0,
     skippedNonCafe: 0,
     skippedDuplicate: 0,
+    skippedClosed: 0,
     detailsCalls: 0,
+    detailsAttempts: 0,
+    detailsFallbacks: 0,
+    created: 0,
+    updated: 0,
+    uniquePlaces: 0,
   };
 
   const seenPlaceIds = new Set();
@@ -298,8 +351,13 @@ export async function collectCafes({
       );
       totals.found += result.found;
       totals.saved += result.saved;
+      totals.created += result.created;
+      totals.updated += result.updated;
       totals.skippedDuplicate += result.skippedDuplicate;
+      totals.skippedClosed += result.skippedClosed;
       totals.detailsCalls += result.detailsCalls;
+      totals.detailsAttempts += result.detailsAttempts;
+      totals.detailsFallbacks += result.detailsFallbacks;
       totals.apiCallsEstimate += result.pages + result.detailsCalls;
 
       await sleep(150);
@@ -310,6 +368,17 @@ export async function collectCafes({
       neighborhood: neighborhood.name,
       message: `Finished ${neighborhood.name}`,
     });
+  }
+
+  totals.uniquePlaces = seenPlaceIds.size;
+
+  if (
+    totals.detailsAttempts >= 5 &&
+    totals.detailsFallbacks / totals.detailsAttempts > 0.5
+  ) {
+    throw new Error(
+      `Place Details failed for ${totals.detailsFallbacks}/${totals.detailsAttempts} calls; aborting so a bad key or quota is not silent.`
+    );
   }
 
   return totals;

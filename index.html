@@ -167,7 +167,7 @@
       <form class="search" id="search-form">
         <div class="search-row">
           <label class="sr-only" for="query">Search</label>
-          <input id="query" name="query" type="search" placeholder="quiet place to work in Gràcia" autocomplete="off" required />
+          <input id="query" name="query" type="search" placeholder="quiet place to work in Gràcia" autocomplete="off" maxlength="300" required />
           <button type="button" class="linkbtn" id="clear-btn" hidden>Clear</button>
           <button type="submit" id="search-btn">Ask →</button>
         </div>
@@ -195,7 +195,7 @@
         <button type="button" class="underlined" id="copy-btn">Copy link</button>
       </div>
 
-      <section id="results" class="results" aria-live="polite"></section>
+      <section id="results" class="results" tabindex="-1"></section>
       <button type="button" class="more" id="more-btn" hidden>Show more</button>
 
       <div class="error" id="error" hidden>
@@ -533,7 +533,7 @@
               maps.target = "_blank";
               maps.rel = "noopener";
               maps.href = c.mapUrl;
-              maps.textContent = "Open in Maps";
+              maps.textContent = `Open ${c.name} in Maps`;
               links.appendChild(maps);
               const dest = c.address || c.name;
               const dir = document.createElement("a");
@@ -741,6 +741,10 @@
 
           renderAnswer(answerParts(parsed.intro, parsed.cafes));
           renderRows();
+          const resultsEl = $("results");
+          if (resultsEl && parsed.cafes.length) {
+            resultsEl.focus({ preventScroll: true });
+          }
         } catch (err) {
           if (err.name === "AbortError") {
             $("status").textContent = "Stopped.";

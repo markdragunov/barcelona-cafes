@@ -109,8 +109,8 @@ Admin is **magic-link** (Supabase Auth + `ADMIN_EMAILS`). There is no `admin.*` 
 
 **DNS (Cloudflare, DNS only / grey cloud until certificates exist):**
 
-- `topcafes.fyi` A `@` → `164.90.200.60`
-- `mark-d.dev` A `@` → `164.90.200.60` (already)
+- `topcafes.fyi` A `@` → `YOUR_DROPLET_IP`
+- `mark-d.dev` A `@` → `YOUR_DROPLET_IP`
 
 Until the production A record exists, keep `DOMAIN=topcafes.fyi,mark-d.dev` and **leave `SANDBOX_DOMAIN` empty** so `mark-d.dev` still serves production. After DNS works: `DOMAIN=topcafes.fyi`, `SANDBOX_DOMAIN=mark-d.dev`, then `deploy/cutover-sandbox-caddy.sh`.
 
@@ -123,6 +123,8 @@ Deploy from **`main`** (it now holds the production stack). Always `SYNC_DATA=0`
 
 ```bash
 # .env: STORAGE_BACKEND=supabase, DATABASE_URL=@db:5432, ADMIN_EMAILS, …
+export REMOTE=user@YOUR_DROPLET_IP
+export SSH_KEY=$HOME/.ssh/id_ed25519   # or your deploy key path
 ./deploy/remote-setup.sh
 SYNC_DATA=0 TARGET=prod ./deploy/sync-and-up.sh
 SYNC_DATA=0 TARGET=sandbox ./deploy/sync-and-up.sh

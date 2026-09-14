@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import chromadb
+import numpy as np
 from openai import OpenAI
 
 from ..bm25_cache import clear_cache, rebuild_from_rows
@@ -60,6 +61,62 @@ def _write_chroma_collection(
     gc.collect()
 
 
+def _existing_chroma_embeddings(chroma_path: Path) -> tuple[dict[str, str], dict[str, list[float]]]:
+    hashes: dict[str, str] = {}
+    embeddings: dict[str, list[float]] = {}
+    if not chroma_path.exists():
+        return hashes, embeddings
+    try:
+        chroma = chromadb.PersistentClient(path=str(chroma_path))
+        collection = chroma.get_collection(COLLECTION_NAME)
+        got = collection.get(include=["embeddings", "metadatas"])
+        ids = list(got.get("ids") or [])
+        metas = list(got.get("metadatas") or [])
+        embs = list(got.get("embeddings") or [])
+        for i, pid in enumerate(ids):
+            meta = metas[i] if i < len(metas) and isinstance(metas[i], dict) else {}
+            hashed = meta.get("content_hash")
+            if isinstance(hashed, str) and hashed:
+                hashes[pid] = hashed
+            emb = embs[i] if i < len(embs) else None
+            if emb is None:
+                continue
+            if hasattr(emb, "tolist"):
+                emb = emb.tolist()
+            try:
+                embeddings[pid] = [float(x) for x in emb]
+            except (TypeError, ValueError):
+                continue
+    except Exception:
+        return {}, {}
+    return hashes, embeddings
+
+
+def _reuse_or_embed(
+    client: OpenAI, documents: list[dict[str, Any]], chroma_path: Path
+) -> tuple[list[Any], int]:
+    existing_hash, existing_emb = _existing_chroma_embeddings(chroma_path)
+    embeddings: list[Any] = [None] * len(documents)
+    to_embed_idx: list[int] = []
+    to_embed_texts: list[str] = []
+    for i, doc in enumerate(documents):
+        pid = doc["place_id"]
+        hashed = doc.get("content_hash")
+        if (
+            hashed
+            and existing_hash.get(pid) == hashed
+            and pid in existing_emb
+        ):
+            embeddings[i] = existing_emb[pid]
+        else:
+            to_embed_idx.append(i)
+            to_embed_texts.append(doc["document"])
+    new_vecs = embed_batch(client, to_embed_texts) if to_embed_texts else []
+    for i, vec in zip(to_embed_idx, new_vecs):
+        embeddings[i] = vec
+    return embeddings, len(to_embed_idx)
+
+
 class ChromaIndexStore:
     backend = "chroma"
 
@@ -73,8 +130,7 @@ class ChromaIndexStore:
         data.mkdir(parents=True, exist_ok=True)
 
         client = OpenAI(api_key=openai_api_key)
-        texts = [d["document"] for d in documents]
-        embeddings = embed_batch(client, texts)
+        embeddings, embedded = _reuse_or_embed(client, documents, chroma_path)
 
         try:
             _write_chroma_collection(staging, documents, embeddings)
@@ -95,7 +151,11 @@ class ChromaIndexStore:
                 for d in documents
             ]
         )
-        return {"indexed": len(documents), "backend": self.backend}
+        return {
+            "indexed": len(documents),
+            "embedded": embedded,
+            "backend": self.backend,
+        }
 
     def is_ready(self) -> bool:
         chroma_path = chroma_dir()
@@ -140,19 +200,23 @@ class ChromaIndexStore:
             ids = list(got.get("ids") or [])
             docs = list(got.get("documents") or [])
             metas = list(got.get("metadatas") or [])
-            embs = list(got.get("embeddings") or [])
-            scored: list[tuple[float, int]] = []
-            for i, emb in enumerate(embs):
+            raw_embs = list(got.get("embeddings") or [])
+            vecs: list[list[float]] = []
+            keep: list[int] = []
+            for i, emb in enumerate(raw_embs):
                 if emb is None:
                     continue
                 if hasattr(emb, "tolist"):
                     emb = emb.tolist()
                 try:
-                    vec = [float(x) for x in emb]
+                    vecs.append([float(x) for x in emb])
                 except (TypeError, ValueError):
                     continue
-                scored.append((_cosine(query_embedding, vec), i))
-            scored.sort(key=lambda x: x[0], reverse=True)
+                keep.append(i)
+            scores = _cosine_scores(query_embedding, vecs)
+            scored = sorted(
+                zip(scores, keep), key=lambda item: item[0], reverse=True
+            )
             hits = []
             for rank, (score, i) in enumerate(scored[:top_n], start=1):
                 meta = metas[i] if i < len(metas) else {}
@@ -218,12 +282,22 @@ class ChromaIndexStore:
         return rows
 
 
+def _cosine_scores(query: list[float], embs: list[list[float]]) -> list[float]:
+    if not embs:
+        return []
+    q = np.asarray(query, dtype=np.float64)
+    mat = np.asarray(embs, dtype=np.float64)
+    if mat.ndim == 1:
+        mat = mat.reshape(1, -1)
+    qn = float(np.linalg.norm(q))
+    nn = np.linalg.norm(mat, axis=1)
+    denom = nn * (qn if qn > 0 else 1.0)
+    scores = np.zeros(mat.shape[0], dtype=np.float64)
+    ok = denom > 0
+    scores[ok] = (mat[ok] @ q) / denom[ok]
+    return scores.tolist()
+
+
 def _cosine(a: list[float], b: list[float]) -> float:
-    dot = na = nb = 0.0
-    for x, y in zip(a, b):
-        dot += x * y
-        na += x * x
-        nb += y * y
-    if na <= 0 or nb <= 0:
-        return 0.0
-    return dot / ((na**0.5) * (nb**0.5))
+    scores = _cosine_scores(a, [b])
+    return float(scores[0]) if scores else 0.0

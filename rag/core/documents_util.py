@@ -119,12 +119,15 @@ def assemble_documents(
         if not coffee and not rtext:
             continue
         document = build_document(cafe, rtext, coffee)
+        hashed = content_hash(row.get("coffee_content"), rtext)
+        meta = cafe_metadata(cafe)
+        meta["content_hash"] = hashed
         documents.append(
             {
                 "place_id": cafe["place_id"],
                 "document": document,
-                "content_hash": content_hash(row.get("coffee_content"), rtext),
-                "metadata": cafe_metadata(cafe),
+                "content_hash": hashed,
+                "metadata": meta,
             }
         )
     return documents

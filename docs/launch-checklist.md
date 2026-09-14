@@ -18,7 +18,7 @@
 - [ ] `/admin` prompts for Basic auth
 
 ## Cutover
-- [ ] DNS A `@` for `topcafes.fyi` → `164.90.200.60` (grey cloud until cert)
+- [ ] DNS A `@` for `topcafes.fyi` → `YOUR_DROPLET_IP` (grey cloud until cert)
 - [ ] Confirm `https://topcafes.fyi/` and `/admin`; sandbox remains `https://mark-d.dev/`
 - [ ] Firewall: 22/80/443 only; 3847 closed
 - [ ] Cron backup present (`crontab -l`)

@@ -4,6 +4,9 @@
   "private": true,
   "description": "Collect Barcelona cafes via Google Places API (New) into local SQLite",
   "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",

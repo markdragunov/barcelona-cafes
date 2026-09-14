@@ -2,8 +2,12 @@
 # Install Docker + Compose plugin on Ubuntu droplet; open firewall.
 set -euo pipefail
 
-REMOTE="${REMOTE:-root@164.90.200.60}"
-SSH_KEY="${SSH_KEY:-$HOME/.ssh/do_ed25519}"
+REMOTE="${REMOTE:-}"
+SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
+if [[ -z "$REMOTE" ]]; then
+  echo "Set REMOTE=user@YOUR_DROPLET_IP (and optionally SSH_KEY)." >&2
+  exit 1
+fi
 SSH=(ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
 
 echo "Setting up ${REMOTE}..."

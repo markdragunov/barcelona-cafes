@@ -1,0 +1,145 @@
+{
+  "$comment": "Local gazetteer of Barcelona landmarks and main streets. Used only by rag/location.py so search can skip Geocoding+LLM for known places. Not collection targets.",
+  "landmarks": [
+    {
+      "id": "sagrada-familia",
+      "name": "Sagrada Família",
+      "aliases": ["Sagrada Familia", "Sagrada", "La Sagrada Familia"],
+      "latitude": 41.4036299,
+      "longitude": 2.1743558
+    },
+    {
+      "id": "park-guell",
+      "name": "Park Güell",
+      "aliases": ["Parc Güell", "Park Guell", "Parc Guell"],
+      "latitude": 41.4144948,
+      "longitude": 2.1526945
+    },
+    {
+      "id": "barceloneta",
+      "name": "Barceloneta",
+      "aliases": ["La Barceloneta", "Barceloneta Beach", "Platja de la Barceloneta"],
+      "latitude": 41.3809,
+      "longitude": 2.1894
+    },
+    {
+      "id": "placa-catalunya",
+      "name": "Plaça Catalunya",
+      "aliases": ["Placa Catalunya", "Plaza Catalunya", "Plaça de Catalunya", "Catalunya square"],
+      "latitude": 41.3870154,
+      "longitude": 2.1700471
+    },
+    {
+      "id": "la-rambla",
+      "name": "La Rambla",
+      "aliases": ["Las Ramblas", "La Rambla de Barcelona", "Ramblas"],
+      "latitude": 41.3818,
+      "longitude": 2.1734
+    },
+    {
+      "id": "passeig-de-gracia",
+      "name": "Passeig de Gràcia",
+      "aliases": ["Paseo de Gracia", "Passeig de Gracia"],
+      "latitude": 41.3915,
+      "longitude": 2.1649
+    },
+    {
+      "id": "casa-batllo",
+      "name": "Casa Batlló",
+      "aliases": ["Casa Batllo"],
+      "latitude": 41.39164,
+      "longitude": 2.16492
+    },
+    {
+      "id": "casa-mila",
+      "name": "Casa Milà",
+      "aliases": ["La Pedrera", "Casa Mila", "Pedrera"],
+      "latitude": 41.3954,
+      "longitude": 2.1619
+    },
+    {
+      "id": "camp-nou",
+      "name": "Camp Nou",
+      "aliases": ["Spotify Camp Nou", "Nou Camp"],
+      "latitude": 41.3809,
+      "longitude": 2.1228
+    },
+    {
+      "id": "montjuic",
+      "name": "Montjuïc",
+      "aliases": ["Montjuic", "Montjuïc castle", "Castell de Montjuïc"],
+      "latitude": 41.363,
+      "longitude": 2.166
+    },
+    {
+      "id": "parc-ciutadella",
+      "name": "Parc de la Ciutadella",
+      "aliases": ["Ciutadella", "Ciutadella Park", "Parque de la Ciudadela"],
+      "latitude": 41.3881,
+      "longitude": 2.1874
+    },
+    {
+      "id": "arc-de-triomf",
+      "name": "Arc de Triomf",
+      "aliases": ["Arco de Triunfo", "Arc de Triomf Barcelona"],
+      "latitude": 41.3911,
+      "longitude": 2.1806
+    },
+    {
+      "id": "port-olimpic",
+      "name": "Port Olímpic",
+      "aliases": ["Port Olimpic", "Olympic Port"],
+      "latitude": 41.387,
+      "longitude": 2.1995
+    },
+    {
+      "id": "boqueria",
+      "name": "La Boqueria",
+      "aliases": ["Mercat de la Boqueria", "Boqueria market", "Mercat de Sant Josep"],
+      "latitude": 41.3817,
+      "longitude": 2.1715
+    },
+    {
+      "id": "hospital-sant-pau",
+      "name": "Hospital de Sant Pau",
+      "aliases": ["Sant Pau", "Recinte Modernista de Sant Pau"],
+      "latitude": 41.4136,
+      "longitude": 2.1744
+    },
+    {
+      "id": "tibidabo",
+      "name": "Tibidabo",
+      "aliases": ["Tibidabo mountain", "Parc d'Atraccions Tibidabo"],
+      "latitude": 41.4225,
+      "longitude": 2.1186
+    },
+    {
+      "id": "bunkers-carmel",
+      "name": "Bunkers del Carmel",
+      "aliases": ["Els Bunkers del Carmel", "Turó de la Rovira", "Carmel bunkers"],
+      "latitude": 41.4194,
+      "longitude": 2.1606
+    },
+    {
+      "id": "placa-espanya",
+      "name": "Plaça d'Espanya",
+      "aliases": ["Placa Espanya", "Plaza España", "Espanya"],
+      "latitude": 41.375,
+      "longitude": 2.149
+    },
+    {
+      "id": "barceloneta-beach",
+      "name": "Barceloneta Beach",
+      "aliases": ["Platja Barceloneta"],
+      "latitude": 41.3784,
+      "longitude": 2.1925
+    },
+    {
+      "id": "gotic-cathedral",
+      "name": "Barcelona Cathedral",
+      "aliases": ["Catedral de Barcelona", "La Seu", "Cathedral of Barcelona"],
+      "latitude": 41.3839,
+      "longitude": 2.1762
+    }
+  ]
+}
