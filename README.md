@@ -1,4 +1,4 @@
-# Barcelona Cafes
+# Barcelona Cafes https://topcafes.fyi/
 
 Local service for collecting Barcelona coffee shops, enriching them with website content, and answering natural-language questions with hybrid RAG — grounded only on your local data.
 
