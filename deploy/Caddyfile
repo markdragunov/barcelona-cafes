@@ -1,0 +1,11 @@
+# Public HTTP entry (use with DOMAIN unset or before DNS).
+# When DOMAIN is set, also enable the TLS site block below via env substitution.
+
+:80 {
+	encode gzip
+	reverse_proxy app:3847
+}
+
+# Set DOMAIN=cafes.example.com for automatic HTTPS (Let's Encrypt).
+# Leave DOMAIN empty in .env to skip this block — replace with a comment-only
+# placeholder by using deploy/Caddyfile.http-only on IP-only hosts if needed.

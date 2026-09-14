@@ -1,0 +1,57 @@
+services:
+  app:
+    build: .
+    restart: always
+    env_file:
+      - .env
+    environment:
+      PORT: "3847"
+      DATA_DIR: /data
+      PYTHON_BIN: /app/.venv/bin/python
+    volumes:
+      - cafes-data:/data
+    expose:
+      - "3847"
+    networks:
+      - internal
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3847/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  proxy:
+    image: caddy:2.8-alpine
+    restart: always
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:-}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:-}
+    volumes:
+      - ./deploy/caddy-entrypoint.sh:/entrypoint.sh:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - internal
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+
+volumes:
+  cafes-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  internal:

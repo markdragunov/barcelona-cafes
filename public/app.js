@@ -1,4 +1,15 @@
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
 const $ = (sel) => document.querySelector(sel);
+
+const loginGate = $("#login-gate");
+const adminApp = $("#admin-app");
+const loginForm = $("#login-form");
+const loginEmail = $("#login-email");
+const loginBtn = $("#login-btn");
+const loginStatus = $("#login-status");
+const adminUserEl = $("#admin-user");
+const signOutBtn = $("#sign-out-btn");
 
 const neighborhoodSelect = $("#neighborhood");
 const apiKeyStatus = $("#api-key-status");
@@ -33,20 +44,35 @@ const coffeeSkipped = $("#coffee-skipped");
 let pollTimer = null;
 let coffeePollTimer = null;
 let indexPollTimer = null;
+let supabase = null;
+let accessToken = null;
+let authMode = "open";
 
-async function api(path, options) {
+async function api(path, options = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
   const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
     ...options,
+    headers,
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(data.error || "Admin authentication required");
+    }
     throw new Error(data.error || `Request failed (${res.status})`);
   }
   return data;
 }
 
 function setStatus(el, message, kind = "") {
+  if (!el) return;
   el.textContent = message || "";
   el.className = `status${kind ? ` ${kind}` : ""}`;
 }
@@ -57,7 +83,44 @@ function selectedNeighborhood() {
 
 function updateExportLink() {
   const id = selectedNeighborhood();
-  exportLink.href = `/api/export.csv?neighborhood=${encodeURIComponent(id)}`;
+  exportLink.dataset.neighborhood = id;
+  exportLink.href = `#export-${encodeURIComponent(id)}`;
+}
+
+async function downloadExport(ev) {
+  ev.preventDefault();
+  const id = exportLink.dataset.neighborhood || selectedNeighborhood();
+  const headers = {};
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  const res = await fetch(
+    `/api/export.csv?neighborhood=${encodeURIComponent(id)}`,
+    { headers, credentials: "same-origin" }
+  );
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `Export failed (${res.status})`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `cafes-${id}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function showLogin() {
+  loginGate.hidden = false;
+  adminApp.hidden = true;
+}
+
+function showAdmin(email) {
+  loginGate.hidden = true;
+  adminApp.hidden = false;
+  adminUserEl.textContent = email ? `Signed in as ${email}` : "";
+  signOutBtn.hidden = authMode !== "magic_link";
 }
 
 async function loadNeighborhoods() {
@@ -120,13 +183,16 @@ async function loadSummary() {
     `/api/summary?neighborhood=${encodeURIComponent(selectedNeighborhood())}`
   );
   for (const [key, value] of Object.entries(data)) {
-    const el = document.querySelector(`[data-key="${key}"]`);
+    const el = document.querySelector(`#summary [data-key="${key}"]`);
     if (!el) continue;
-    if (value === null || value === undefined) {
-      el.textContent = "—";
-    } else {
-      el.textContent = String(value);
-    }
+    el.textContent =
+      value === null || value === undefined
+        ? "—"
+        : typeof value === "number"
+          ? Number.isInteger(value)
+            ? String(value)
+            : value.toFixed(2)
+          : String(value);
   }
 }
 
@@ -137,38 +203,18 @@ function renderLogs(el, logs) {
     return;
   }
   el.hidden = false;
-  el.textContent = logs
-    .map((l) => {
-      const msg =
-        l.message ||
-        [l.neighborhood, l.query, l.stage].filter(Boolean).join(" · ");
-      return `${l.at?.slice(11, 19) || ""}  ${msg}`;
-    })
-    .join("\n");
+  el.textContent = logs.join("\n");
   el.scrollTop = el.scrollHeight;
 }
 
-let collectRunning = false;
-let coffeeRunning = false;
-
 function setCollectingUi(running) {
-  collectRunning = running;
-  collectBtn.disabled = running || coffeeRunning;
+  collectBtn.disabled = running;
   cancelBtn.disabled = !running;
-  coffeeFetchBtn.disabled = coffeeRunning || running;
-  syncNeighborhoodLock();
 }
 
 function setCoffeeUi(running) {
-  coffeeRunning = running;
-  coffeeFetchBtn.disabled = running || collectRunning;
+  coffeeFetchBtn.disabled = running;
   coffeeCancelBtn.disabled = !running;
-  collectBtn.disabled = collectRunning || running;
-  syncNeighborhoodLock();
-}
-
-function syncNeighborhoodLock() {
-  neighborhoodSelect.disabled = collectRunning || coffeeRunning;
 }
 
 function updateCoffeeProgress(data) {
@@ -185,210 +231,155 @@ function updateCoffeeProgress(data) {
 }
 
 async function pollCollectStatus() {
-  const data = await api("/api/collect/status");
-  renderLogs(collectLog, data.logs);
-
-  if (data.running) {
+  const status = await api("/api/collect/status");
+  renderLogs(collectLog, status.logs);
+  if (status.running) {
     setCollectingUi(true);
-    const last = data.logs?.[data.logs.length - 1];
-    setStatus(
-      collectStatus,
-      last?.message || "Collection running…",
-      "warn"
-    );
-    return;
+    setStatus(collectStatus, "Collection running…", "warn");
+    return true;
   }
-
   setCollectingUi(false);
-  if (pollTimer) {
-    clearInterval(pollTimer);
-    pollTimer = null;
-  }
-
-  if (data.error) {
-    setStatus(collectStatus, data.error, "err");
-  } else if (data.result) {
-    setStatus(
-      collectStatus,
-      `Finished. Upserted ${data.result.saved} cafe rows from ${data.result.found} API hits.`,
-      "ok"
-    );
+  if (status.error) {
+    setStatus(collectStatus, status.error, "err");
+  } else if (status.finishedAt) {
+    setStatus(collectStatus, "Collection finished.", "ok");
     await loadSummary();
   }
+  return false;
 }
 
 async function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
-  await pollCollectStatus();
-  pollTimer = setInterval(() => {
-    pollCollectStatus().catch((err) => {
+  const tick = async () => {
+    try {
+      const running = await pollCollectStatus();
+      if (!running && pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    } catch (err) {
       setStatus(collectStatus, err.message, "err");
-    });
-  }, 1500);
+    }
+  };
+  await tick();
+  pollTimer = setInterval(tick, 1500);
 }
 
 async function pollCoffeeStatus() {
-  const data = await api("/api/coffee-content/status");
-  updateCoffeeProgress(data);
-  renderLogs(coffeeLog, data.logs);
-
-  if (data.running) {
+  const status = await api("/api/coffee-content/status");
+  updateCoffeeProgress(status);
+  renderLogs(coffeeLog, status.logs);
+  if (status.running) {
     setCoffeeUi(true);
-    const label = data.current?.name
-      ? `Extracting ${data.current.name} (${data.completed}/${data.total})…`
-      : `Processing ${data.completed}/${data.total}…`;
-    setStatus(coffeeStatus, label, "warn");
-    return;
+    setStatus(coffeeStatus, "Fetching coffee content…", "warn");
+    return true;
   }
-
   setCoffeeUi(false);
-  if (coffeePollTimer) {
-    clearInterval(coffeePollTimer);
-    coffeePollTimer = null;
+  if (status.error) {
+    setStatus(coffeeStatus, status.error, "err");
+  } else if (status.finishedAt) {
+    setStatus(coffeeStatus, "Coffee content fetch finished.", "ok");
   }
-
-  if (data.error) {
-    setStatus(coffeeStatus, data.error, "err");
-  } else if (data.finishedAt) {
-    setStatus(
-      coffeeStatus,
-      `Finished. Completed ${data.completed}/${data.total}; skipped ${data.skipped}${
-        data.failed ? `; failed ${data.failed}` : ""
-      }.`,
-      data.failed ? "warn" : "ok"
-    );
-    await loadSummary();
-  }
+  return false;
 }
 
 async function startCoffeePolling() {
   if (coffeePollTimer) clearInterval(coffeePollTimer);
-  await pollCoffeeStatus();
-  coffeePollTimer = setInterval(() => {
-    pollCoffeeStatus().catch((err) => {
+  const tick = async () => {
+    try {
+      const running = await pollCoffeeStatus();
+      if (!running && coffeePollTimer) {
+        clearInterval(coffeePollTimer);
+        coffeePollTimer = null;
+      }
+    } catch (err) {
       setStatus(coffeeStatus, err.message, "err");
-    });
-  }, 1200);
+    }
+  };
+  await tick();
+  coffeePollTimer = setInterval(tick, 1500);
 }
 
 async function pollIndexStatus() {
-  const data = await api("/api/rag/index/status");
-  if (data.running) {
+  const status = await api("/api/rag/index/status");
+  if (status.running) {
     indexCafesBtn.disabled = true;
-    ragSearchBtn.disabled = true;
-    setStatus(indexStatus, "Rebuilding ChromaDB + BM25 indexes…", "warn");
-    return;
+    setStatus(indexStatus, "Indexing cafes…", "warn");
+    return true;
   }
-
   indexCafesBtn.disabled = false;
-  ragSearchBtn.disabled = false;
-  if (indexPollTimer) {
-    clearInterval(indexPollTimer);
-    indexPollTimer = null;
-  }
-
-  if (data.error) {
-    setStatus(indexStatus, data.error, "err");
-  } else if (data.result) {
+  if (status.error) {
+    setStatus(indexStatus, status.error, "err");
+  } else if (status.result) {
     setStatus(
       indexStatus,
-      `Indexed ${data.result.indexed} cafes into ChromaDB + BM25.`,
+      `Indexed ${status.result.indexed ?? status.result.document_count ?? "?"} docs`,
       "ok"
     );
+    await loadRagStatus();
   }
-  await loadRagStatus();
+  return false;
 }
 
 async function startIndexPolling() {
   if (indexPollTimer) clearInterval(indexPollTimer);
-  await pollIndexStatus();
-  indexPollTimer = setInterval(() => {
-    pollIndexStatus().catch((err) => {
+  const tick = async () => {
+    try {
+      const running = await pollIndexStatus();
+      if (!running && indexPollTimer) {
+        clearInterval(indexPollTimer);
+        indexPollTimer = null;
+      }
+    } catch (err) {
       setStatus(indexStatus, err.message, "err");
-    });
-  }, 1500);
+    }
+  };
+  await tick();
+  indexPollTimer = setInterval(tick, 2000);
 }
 
-indexCafesBtn.addEventListener("click", async () => {
-  try {
-    indexCafesBtn.disabled = true;
-    ragSearchBtn.disabled = true;
-    setStatus(indexStatus, "Starting index rebuild…", "warn");
-    await api("/api/rag/index", { method: "POST", body: "{}" });
-    await startIndexPolling();
-  } catch (err) {
-    indexCafesBtn.disabled = false;
-    ragSearchBtn.disabled = false;
-    setStatus(indexStatus, err.message, "err");
-  }
-});
-
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-/** Render answer: safe HTML + clickable markdown [map](url) / [site](url). */
-function formatRagAnswer(text) {
-  const escaped = escapeHtml(text);
-  const withLinks = escaped.replace(
-    /\[(map|site)\]\((https?:\/\/[^)\s]+)\)/gi,
-    '<a href="$2" target="_blank" rel="noopener">$1</a>'
-  );
-  return withLinks.replace(/\n/g, "<br>");
-}
-
-ragSearchForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const query = ragQuery.value.trim();
-  let topN = Number(ragTopN.value || 5);
-  if (!Number.isFinite(topN)) topN = 5;
-  topN = Math.max(1, Math.min(20, Math.round(topN)));
-  ragTopN.value = String(topN);
-
-  try {
-    ragSearchBtn.disabled = true;
-    indexCafesBtn.disabled = true;
-    ragAnswer.hidden = true;
-    setStatus(
-      ragSearchStatus,
-      "Detecting location, then searching (vector + BM25)…",
-      "warn"
-    );
-    const data = await api("/api/rag/search", {
-      method: "POST",
-      body: JSON.stringify({ query, topN }),
-    });
-    ragAnswerText.innerHTML = formatRagAnswer(data.answer || "");
-    ragAnswer.hidden = false;
-    const loc = data.location;
-    const locBit =
-      loc?.applied && loc.location
-        ? ` · near ${loc.location} (1 km, ${loc.cafe_count ?? 0} cafes)`
-        : " · citywide";
-    setStatus(
-      ragSearchStatus,
-      `Done. Used ${data.results?.length ?? 0} cafes (vector ${data.vector_count}, BM25 ${data.bm25_count})${locBit}.`,
-      "ok"
-    );
-  } catch (err) {
-    setStatus(ragSearchStatus, err.message, "err");
-  } finally {
-    ragSearchBtn.disabled = false;
-    indexCafesBtn.disabled = false;
-  }
-});
-
-neighborhoodSelect.addEventListener("change", () => {
+neighborhoodSelect?.addEventListener("change", () => {
   updateExportLink();
   loadSummary().catch((err) => setStatus(collectStatus, err.message, "err"));
 });
 
-collectForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
+indexCafesBtn?.addEventListener("click", async () => {
+  try {
+    indexCafesBtn.disabled = true;
+    setStatus(indexStatus, "Starting index…", "warn");
+    await api("/api/rag/index", { method: "POST", body: "{}" });
+    await startIndexPolling();
+  } catch (err) {
+    indexCafesBtn.disabled = false;
+    setStatus(indexStatus, err.message, "err");
+  }
+});
+
+ragSearchForm?.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try {
+    ragSearchBtn.disabled = true;
+    setStatus(ragSearchStatus, "Searching…", "warn");
+    ragAnswer.hidden = true;
+    const data = await api("/api/rag/search", {
+      method: "POST",
+      body: JSON.stringify({
+        query: ragQuery.value,
+        topN: Number(ragTopN.value) || 5,
+      }),
+    });
+    ragAnswerText.textContent = data.answer || "";
+    ragAnswer.hidden = false;
+    setStatus(ragSearchStatus, "Done.", "ok");
+  } catch (err) {
+    setStatus(ragSearchStatus, err.message, "err");
+  } finally {
+    ragSearchBtn.disabled = false;
+  }
+});
+
+collectForm?.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
   try {
     setCollectingUi(true);
     setStatus(collectStatus, "Starting collection…", "warn");
@@ -405,7 +396,7 @@ collectForm.addEventListener("submit", async (e) => {
   }
 });
 
-cancelBtn.addEventListener("click", async () => {
+cancelBtn?.addEventListener("click", async () => {
   try {
     await api("/api/collect/cancel", { method: "POST", body: "{}" });
     setStatus(collectStatus, "Cancelling…", "warn");
@@ -414,7 +405,7 @@ cancelBtn.addEventListener("click", async () => {
   }
 });
 
-coffeeFetchBtn.addEventListener("click", async () => {
+coffeeFetchBtn?.addEventListener("click", async () => {
   try {
     setCoffeeUi(true);
     setStatus(coffeeStatus, "Starting coffee content fetch…", "warn");
@@ -436,7 +427,7 @@ coffeeFetchBtn.addEventListener("click", async () => {
   }
 });
 
-coffeeCancelBtn.addEventListener("click", async () => {
+coffeeCancelBtn?.addEventListener("click", async () => {
   try {
     await api("/api/coffee-content/cancel", { method: "POST", body: "{}" });
     setStatus(coffeeStatus, "Cancelling…", "warn");
@@ -445,11 +436,17 @@ coffeeCancelBtn.addEventListener("click", async () => {
   }
 });
 
-refreshSummaryBtn.addEventListener("click", () => {
+refreshSummaryBtn?.addEventListener("click", () => {
   loadSummary().catch((err) => setStatus(collectStatus, err.message, "err"));
 });
 
-async function init() {
+exportLink?.addEventListener("click", (ev) => {
+  downloadExport(ev).catch((err) =>
+    setStatus(collectStatus, err.message, "err")
+  );
+});
+
+async function bootstrapAdminUi() {
   await loadNeighborhoods();
   await loadApiKeyStatus();
   await loadParallelKeyStatus();
@@ -481,6 +478,104 @@ async function init() {
   }
 }
 
+async function applySession(session) {
+  accessToken = session?.access_token || null;
+  if (!accessToken) {
+    showLogin();
+    return false;
+  }
+  try {
+    const me = await api("/api/auth/me");
+    showAdmin(me.email);
+    await bootstrapAdminUi();
+    return true;
+  } catch (err) {
+    accessToken = null;
+    if (supabase) await supabase.auth.signOut();
+    showLogin();
+    setStatus(loginStatus, err.message, "err");
+    return false;
+  }
+}
+
+loginForm?.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  if (!supabase) {
+    setStatus(
+      loginStatus,
+      authMode === "basic"
+        ? "This server uses HTTP Basic auth. Reload the page and sign in with your admin username and password."
+        : "Magic-link sign-in is not configured on this server.",
+      "err"
+    );
+    return;
+  }
+  const email = loginEmail.value.trim();
+  if (!email) return;
+  loginBtn.disabled = true;
+  setStatus(loginStatus, "Sending magic link…", "warn");
+  try {
+    const redirectTo = `${window.location.origin}/admin`;
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: redirectTo },
+    });
+    if (error) throw error;
+    setStatus(
+      loginStatus,
+      `Check ${email} for the magic link (then return here).`,
+      "ok"
+    );
+  } catch (err) {
+    setStatus(loginStatus, err.message || String(err), "err");
+  } finally {
+    loginBtn.disabled = false;
+  }
+});
+
+signOutBtn?.addEventListener("click", async () => {
+  accessToken = null;
+  if (supabase) await supabase.auth.signOut();
+  showLogin();
+  setStatus(loginStatus, "Signed out.", "ok");
+});
+
+async function init() {
+  const cfgRes = await fetch("/api/auth/config");
+  const cfg = await cfgRes.json();
+  authMode = cfg.authMode || "open";
+
+  if (authMode === "magic_link") {
+    supabase = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+      },
+    });
+
+    supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.access_token) {
+        accessToken = session.access_token;
+      }
+    });
+
+    const { data } = await supabase.auth.getSession();
+    if (data.session) {
+      await applySession(data.session);
+    } else {
+      showLogin();
+    }
+    return;
+  }
+
+  // basic or open: no magic-link gate
+  accessToken = null;
+  showAdmin(authMode === "basic" ? "Basic auth (browser)" : null);
+  await bootstrapAdminUi();
+}
+
 init().catch((err) => {
-  setStatus(collectStatus, err.message, "err");
+  showLogin();
+  setStatus(loginStatus || collectStatus, err.message, "err");
 });

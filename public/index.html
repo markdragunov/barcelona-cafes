@@ -13,12 +13,51 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div class="page">
+    <div id="login-gate" class="page login-page" hidden>
       <header class="header">
         <p class="brand">Barcelona Cafes</p>
-        <h1>Places collector</h1>
+        <h1>Admin sign-in</h1>
         <p class="lede">
-          Pull cafes from Google Places API (New) into a local SQLite database.
+          Enter your email. We’ll send a one-time magic link. Only allowlisted
+          addresses can open the admin panel.
+        </p>
+      </header>
+      <main class="grid">
+        <section class="panel">
+          <form id="login-form" class="stack">
+            <label>
+              Email
+              <input
+                id="login-email"
+                type="email"
+                autocomplete="username"
+                required
+                placeholder="you@example.com"
+              />
+            </label>
+            <div class="row">
+              <button type="submit" id="login-btn">Send magic link</button>
+            </div>
+            <p id="login-status" class="status" aria-live="polite"></p>
+          </form>
+        </section>
+      </main>
+    </div>
+
+    <div id="admin-app" class="page" hidden>
+      <header class="header">
+        <div class="row between">
+          <div>
+            <p class="brand">Barcelona Cafes</p>
+            <h1>Places collector</h1>
+          </div>
+          <div class="stack" style="align-items: flex-end; gap: 0.35rem">
+            <p id="admin-user" class="meta" style="margin: 0"></p>
+            <button type="button" id="sign-out-btn" class="ghost">Sign out</button>
+          </div>
+        </div>
+        <p class="lede">
+          Pull cafes from Google Places API (New) into storage.
           Only places with <code>cafe</code> in <code>types</code> are saved.
         </p>
       </header>

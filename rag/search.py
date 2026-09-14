@@ -1,19 +1,19 @@
-"""Hybrid vector + BM25 search and grounded LLM answer."""
+"""Hybrid vector + in-memory BM25 search and grounded LLM answer."""
 
 from __future__ import annotations
 
 import json
-import pickle
 import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-import chromadb
 from openai import OpenAI
 
-from .paths import BM25_PATH, CHROMA_DIR, CHAT_MODEL, COLLECTION_NAME, EMBEDDING_MODEL
+from .bm25_cache import get_cache
 from .index import indexes_ready
 from .location import resolve_location_filter
+from .paths import CHAT_MODEL, EMBEDDING_MODEL
+from .stores.factory import get_index_store
 
 REASONING_PROMPT = """You help recommend Barcelona coffee shops.
 Use ONLY the provided cafe data. No outside knowledge.
@@ -38,90 +38,6 @@ def _tokenize(text: str) -> list[str]:
     return re.findall(r"[a-z0-9àáâãäåæçèéêëìíîïñòóôõöùúûüýÿ]+", text.lower())
 
 
-def _load_bm25() -> dict[str, Any]:
-    with open(BM25_PATH, "rb") as f:
-        return pickle.load(f)
-
-
-def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    dot = 0.0
-    na = 0.0
-    nb = 0.0
-    for x, y in zip(a, b):
-        dot += x * y
-        na += x * x
-        nb += y * y
-    if na <= 0 or nb <= 0:
-        return 0.0
-    return dot / ((na ** 0.5) * (nb ** 0.5))
-
-
-def _as_sequence(value: Any) -> list[Any]:
-    """Normalize Chroma/numpy return values without boolean-testing arrays."""
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return value
-    # numpy arrays / array-likes: avoid `value or []` (ambiguous truth value).
-    try:
-        return list(value)
-    except TypeError:
-        return []
-
-
-def _embedding_to_list(emb: Any) -> list[float] | None:
-    if emb is None:
-        return None
-    if hasattr(emb, "tolist"):
-        emb = emb.tolist()
-    try:
-        return [float(x) for x in emb]
-    except (TypeError, ValueError):
-        return None
-
-
-def _vector_search_filtered(
-    collection: Any,
-    query_emb: list[float],
-    top_n: int,
-    candidate_ids: list[str],
-) -> list[dict[str, Any]]:
-    """Rank only geo-filtered IDs by cosine similarity to the query embedding."""
-    got = collection.get(
-        ids=candidate_ids,
-        include=["documents", "metadatas", "embeddings"],
-    )
-    ids = _as_sequence(got.get("ids"))
-    docs = _as_sequence(got.get("documents"))
-    metas = _as_sequence(got.get("metadatas"))
-    embs = _as_sequence(got.get("embeddings"))
-
-    scored: list[tuple[float, int]] = []
-    for i, emb in enumerate(embs):
-        vec = _embedding_to_list(emb)
-        if vec is None:
-            continue
-        scored.append((_cosine_similarity(query_emb, vec), i))
-    scored.sort(key=lambda x: x[0], reverse=True)
-
-    hits: list[dict[str, Any]] = []
-    for rank, (score, i) in enumerate(scored[:top_n], start=1):
-        meta = metas[i] if i < len(metas) else {}
-        if not isinstance(meta, dict):
-            meta = {}
-        hits.append(
-            {
-                "place_id": ids[i],
-                "document": docs[i] if i < len(docs) else "",
-                "metadata": meta,
-                "rank": rank,
-                "score": float(score),
-                "source": "vector",
-            }
-        )
-    return hits
-
-
 def _vector_search(
     client: OpenAI,
     query: str,
@@ -129,45 +45,7 @@ def _vector_search(
     allowed_place_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     emb = client.embeddings.create(model=EMBEDDING_MODEL, input=[query]).data[0].embedding
-    chroma = chromadb.PersistentClient(path=str(CHROMA_DIR))
-    collection = chroma.get_collection(COLLECTION_NAME)
-
-    if allowed_place_ids is not None:
-        if not allowed_place_ids:
-            return []
-        indexed_ids = set(collection.get(include=[]).get("ids") or [])
-        candidate_ids = [pid for pid in allowed_place_ids if pid in indexed_ids]
-        if not candidate_ids:
-            return []
-        return _vector_search_filtered(collection, emb, top_n, candidate_ids)
-
-    n_results = min(top_n, max(collection.count(), 1))
-    result = collection.query(
-        query_embeddings=[emb],
-        n_results=n_results,
-        include=["documents", "metadatas", "distances"],
-    )
-
-    hits: list[dict[str, Any]] = []
-    ids = (result.get("ids") or [[]])[0]
-    docs = (result.get("documents") or [[]])[0]
-    metas = (result.get("metadatas") or [[]])[0]
-    dists = (result.get("distances") or [[]])[0]
-    for rank, (pid, doc, meta, dist) in enumerate(
-        zip(ids, docs, metas, dists), start=1
-    ):
-        similarity = 1.0 - float(dist) if dist is not None else 0.0
-        hits.append(
-            {
-                "place_id": pid,
-                "document": doc,
-                "metadata": meta or {},
-                "rank": rank,
-                "score": similarity,
-                "source": "vector",
-            }
-        )
-    return hits
+    return get_index_store().vector_search(emb, top_n, allowed_place_ids)
 
 
 def _bm25_search(
@@ -175,11 +53,13 @@ def _bm25_search(
     top_n: int,
     allowed_place_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    payload = _load_bm25()
+    payload = get_cache()
     bm25 = payload["bm25"]
     place_ids = payload["place_ids"]
     documents = payload["documents"]
     metadatas = payload["metadatas"]
+    if not place_ids:
+        return []
     tokens = _tokenize(query)
     if not tokens:
         return []
@@ -214,7 +94,6 @@ def merge_hybrid(
     bm25_hits: list[dict[str, Any]],
     top_n: int,
 ) -> list[dict[str, Any]]:
-    """Reciprocal Rank Fusion, dedupe by Places ID, keep top N."""
     fused: dict[str, dict[str, Any]] = {}
 
     def add(hit: dict[str, Any]) -> None:
@@ -234,7 +113,6 @@ def merge_hybrid(
             fused[pid]["vector_rank"] = hit["rank"]
         else:
             fused[pid]["bm25_rank"] = hit["rank"]
-        # Prefer non-empty document/metadata if one side is richer
         if hit.get("document"):
             fused[pid]["document"] = hit["document"]
         if hit.get("metadata"):
@@ -258,7 +136,6 @@ def _format_context(cafes: list[dict[str, Any]]) -> str:
         address = meta.get("address") or ""
         website = meta.get("website") or ""
         district = meta.get("district") or ""
-        # Put structured fields first so the model cannot miss them.
         header = "\n".join(
             [
                 f"Cafe {i}",
@@ -295,7 +172,6 @@ def _format_cafe_block(
     why = (why or "Matches your search based on the available cafe data.").strip()
 
     line1 = f"{name} ★ {rating}" if rating else name
-    # Address line: plain text only — never placeholders or links.
     line_address = address if address else "Address unavailable"
 
     link_parts: list[str] = []
@@ -319,14 +195,15 @@ def _parse_reasons_json(raw: str) -> dict[str, Any]:
     return json.loads(text)
 
 
-def answer_with_llm(
+def recommend_cafes(
     client: OpenAI, query: str, cafes: list[dict[str, Any]]
-) -> str:
+) -> dict[str, Any]:
     if not cafes:
-        return (
+        intro = (
             "I could not find relevant cafes in the local index for that question. "
             "Try re-indexing or broadening the query."
         )
+        return {"intro": intro, "reasons_by_id": {}, "answer": intro}
 
     context = _format_context(cafes)
     user_content = (
@@ -359,7 +236,6 @@ def answer_with_llm(
             if pid and why:
                 reasons_by_id[pid] = why
     except (json.JSONDecodeError, TypeError, ValueError):
-        # Fall back to generic reasons; names/addresses still come from metadata.
         pass
 
     blocks = [
@@ -370,7 +246,17 @@ def answer_with_llm(
         )
         for cafe in cafes
     ]
-    return intro + "\n\n" + "\n\n".join(blocks)
+    return {
+        "intro": intro,
+        "reasons_by_id": reasons_by_id,
+        "answer": intro + "\n\n" + "\n\n".join(blocks),
+    }
+
+
+def answer_with_llm(
+    client: OpenAI, query: str, cafes: list[dict[str, Any]]
+) -> str:
+    return recommend_cafes(client, query, cafes)["answer"]
 
 
 def hybrid_search_and_answer(
@@ -389,7 +275,7 @@ def hybrid_search_and_answer(
 
     client = OpenAI(api_key=openai_api_key)
 
-    location_info = resolve_location_filter(client, google_api_key or "", query)
+    location_info = resolve_location_filter(google_api_key or "", query)
     allowed: set[str] | None = None
     if location_info["applied"]:
         place_ids = location_info.get("place_ids") or []
@@ -398,7 +284,11 @@ def hybrid_search_and_answer(
             return {
                 "answer": (
                     f"I couldn't find cafes within 1 km of {loc} "
-                    "in the local database."
+                    "in the local database. Try a broader area."
+                ),
+                "intro": (
+                    f"I couldn't find cafes within 1 km of {loc} "
+                    "in the local database. Try a broader area."
                 ),
                 "top_n": top_n,
                 "results": [],
@@ -406,27 +296,31 @@ def hybrid_search_and_answer(
                 "bm25_count": 0,
                 "location": {
                     "applied": True,
+                    "requested": True,
                     "location": location_info.get("location"),
                     "location_type": location_info.get("location_type"),
                     "coordinates": location_info.get("coordinates"),
                     "radius_km": location_info.get("radius_km"),
                     "cafe_count": 0,
+                    "source": location_info.get("source"),
+                    "notice": None,
                 },
             }
         allowed = set(place_ids)
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        vector_future = pool.submit(
-            _vector_search, client, query, top_n, allowed
-        )
-        bm25_future = pool.submit(_bm25_search, query, top_n, allowed)
-        vector_hits = vector_future.result()
-        bm25_hits = bm25_future.result()
-    merged = merge_hybrid(vector_hits, bm25_hits, top_n)
-    answer = answer_with_llm(client, query, merged)
+        fut_v = pool.submit(_vector_search, client, query, top_n * 2, allowed)
+        fut_b = pool.submit(_bm25_search, query, top_n * 2, allowed)
+        vector_hits = fut_v.result()
+        bm25_hits = fut_b.result()
 
-    return {
-        "answer": answer,
+    merged = merge_hybrid(vector_hits, bm25_hits, top_n)
+    recommendation = recommend_cafes(client, query, merged)
+    reasons_by_id = recommendation.get("reasons_by_id") or {}
+
+    payload: dict[str, Any] = {
+        "answer": recommendation["answer"],
+        "intro": recommendation.get("intro") or "",
         "top_n": top_n,
         "results": [
             {
@@ -436,9 +330,12 @@ def hybrid_search_and_answer(
                 "rating": (c.get("metadata") or {}).get("rating"),
                 "district": (c.get("metadata") or {}).get("district"),
                 "website": (c.get("metadata") or {}).get("website"),
-                "combined_score": c["combined_score"],
-                "vector_rank": c["vector_rank"],
-                "bm25_rank": c["bm25_rank"],
+                "latitude": (c.get("metadata") or {}).get("latitude"),
+                "longitude": (c.get("metadata") or {}).get("longitude"),
+                "why": reasons_by_id.get(c["place_id"]) or "",
+                "combined_score": c.get("combined_score"),
+                "vector_rank": c.get("vector_rank"),
+                "bm25_rank": c.get("bm25_rank"),
             }
             for c in merged
         ],
@@ -446,10 +343,19 @@ def hybrid_search_and_answer(
         "bm25_count": len(bm25_hits),
         "location": {
             "applied": bool(location_info.get("applied")),
+            "requested": bool(location_info.get("requested")),
             "location": location_info.get("location"),
             "location_type": location_info.get("location_type"),
             "coordinates": location_info.get("coordinates"),
             "radius_km": location_info.get("radius_km"),
             "cafe_count": location_info.get("cafe_count"),
+            "source": location_info.get("source"),
+            "notice": location_info.get("notice"),
         },
     }
+
+    # Server-side only: Node logs this and never forwards it to the client.
+    if location_info.get("error"):
+        payload["location_error"] = location_info["error"]
+
+    return payload

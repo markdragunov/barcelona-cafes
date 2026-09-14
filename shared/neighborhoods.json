@@ -1,0 +1,59 @@
+{
+  "$comment": "Single source of truth for Barcelona neighborhood viewports. Consumed by src/neighborhoods.js (Places collection, /api/neighborhoods) and rag/neighborhoods.py (location lookup). Viewport corners are southwest (low) / northeast (high). Entries marked aggregate cover the whole city and are never used as a location filter.",
+  "neighborhoods": [
+    {
+      "id": "el-born",
+      "name": "El Born",
+      "aliases": ["Born", "El Borne", "La Ribera"],
+      "viewport": {
+        "low": { "latitude": 41.3825, "longitude": 2.178 },
+        "high": { "latitude": 41.3885, "longitude": 2.1865 }
+      }
+    },
+    {
+      "id": "eixample",
+      "name": "Eixample",
+      "aliases": ["L'Eixample", "Dreta de l'Eixample"],
+      "viewport": {
+        "low": { "latitude": 41.385, "longitude": 2.145 },
+        "high": { "latitude": 41.405, "longitude": 2.175 }
+      }
+    },
+    {
+      "id": "poblenou",
+      "name": "Poblenou",
+      "aliases": ["El Poblenou", "Pueblo Nuevo"],
+      "viewport": {
+        "low": { "latitude": 41.39, "longitude": 2.185 },
+        "high": { "latitude": 41.415, "longitude": 2.215 }
+      }
+    },
+    {
+      "id": "gracia",
+      "name": "Gràcia",
+      "aliases": ["Vila de Gràcia", "Грасия", "Грасии"],
+      "viewport": {
+        "low": { "latitude": 41.4, "longitude": 2.145 },
+        "high": { "latitude": 41.415, "longitude": 2.165 }
+      }
+    },
+    {
+      "id": "gothic-quarter",
+      "name": "Gothic Quarter",
+      "aliases": ["Barri Gòtic", "Barrio Gótico", "Gothic", "哥特区", "哥德区"],
+      "viewport": {
+        "low": { "latitude": 41.379, "longitude": 2.173 },
+        "high": { "latitude": 41.3855, "longitude": 2.181 }
+      }
+    },
+    {
+      "id": "all-barcelona",
+      "name": "All Barcelona",
+      "aggregate": true,
+      "viewport": {
+        "low": { "latitude": 41.32, "longitude": 2.07 },
+        "high": { "latitude": 41.47, "longitude": 2.23 }
+      }
+    }
+  ]
+}

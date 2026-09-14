@@ -47,6 +47,8 @@ def main(argv: list[str] | None = None) -> None:
     p_search.add_argument("--query", required=True)
     p_search.add_argument("--top-n", type=int, default=5)
 
+    sub.add_parser("worker")
+
     args = parser.parse_args(argv)
 
     try:
@@ -73,6 +75,12 @@ def main(argv: list[str] | None = None) -> None:
                 google_api_key=_google_api_key(),
             )
             _ok(result)
+            return
+
+        if args.command == "worker":
+            from .worker import run_worker
+
+            run_worker()
             return
 
         _err(f"Unknown command: {args.command}")
