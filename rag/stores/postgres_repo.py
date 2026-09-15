@@ -37,6 +37,7 @@ class PostgresCafeRepository:
         north: float | None = None,
         west: float | None = None,
         east: float | None = None,
+        place_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         sql = """
             SELECT place_id, latitude, longitude FROM cafes
@@ -48,6 +49,11 @@ class PostgresCafeRepository:
                 " AND latitude BETWEEN %s AND %s AND longitude BETWEEN %s AND %s"
             )
             params = (south, north, west, east)
+        if place_ids is not None:
+            if not place_ids:
+                return []
+            sql += " AND place_id = ANY(%s)"
+            params = (*params, list(place_ids))
         return fetch_all(sql, params)
 
     def cafe_count(self) -> int:

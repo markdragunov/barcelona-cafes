@@ -18,6 +18,7 @@ import {
   getSearchMaxQueryChars,
   getSearchCacheTtlMs,
   getSearchCacheMaxEntries,
+  assertAdminAuthConfigured,
 } from "./config.js";
 import {
   getSummary,
@@ -25,7 +26,6 @@ import {
   getCafesNeedingCoffeeContent,
   countCafesWithCoffeeContent,
   updateCoffeeContent,
-  listCafeCoordinates,
 } from "./db.js";
 import {
   NEIGHBORHOOD_LIST,
@@ -35,8 +35,7 @@ import {
 import { collectCafes } from "./places.js";
 import { extractCoffeeContent } from "./extract.js";
 import { SEARCH_QUERIES } from "./queries.js";
-import { runRag, warmupRagWorker, shutdownRagWorker } from "./ragBridge.js";
-import {
+import { runRag, warmupRagWorker, shutdownRagWorker } from "./ragBridge.js";import {
   requireAdmin,
   rateLimit,
   globalRateLimit,
@@ -172,23 +171,73 @@ app.get("/api/auth/me", (req, res) => {
   });
 });
 
-app.get("/api/ready", async (_req, res) => {
-  try {
-    const summary = await getSummary("all-barcelona");
-    const status = await runRag(["status"], { timeoutMs: 60_000 });
-    const ready =
-      Boolean(status.ready) &&
-      Number(status.document_count ?? 0) > 0 &&
-      Number(summary.total_cafes ?? 0) > 0;
-    const payload = {
+const READY_CACHE_TTL_MS = 15_000;
+let readyCache = { at: 0, status: 503, payload: null };
+let readyRefresh = null;
+
+async function loadReadySnapshot() {
+  const summary = await getSummary("all-barcelona");
+  const status = await runRag(["status"], { timeoutMs: 60_000 });
+  const ready =
+    Boolean(status.ready) &&
+    Number(status.document_count ?? 0) > 0 &&
+    Number(summary.total_cafes ?? 0) > 0;
+  return {
+    status: ready ? 200 : 503,
+    payload: {
       ready,
       cafes: summary.total_cafes ?? 0,
       documents: status.document_count ?? 0,
-      indexing: Boolean(indexJob?.running),
       dataDir: getDataDir(),
-      adminAuth: isAdminAuthEnabled(),
-    };
-    res.status(ready ? 200 : 503).json(payload);
+    },
+  };
+}
+
+function refreshReadyCache() {
+  if (readyRefresh) return readyRefresh;
+  readyRefresh = loadReadySnapshot()
+    .then((snapshot) => {
+      readyCache = { at: Date.now(), ...snapshot };
+    })
+    .catch((err) => {
+      console.error(
+        JSON.stringify({
+          msg: "ready_refresh_failed",
+          error: err.message || String(err),
+        })
+      );
+    })
+    .finally(() => {
+      readyRefresh = null;
+    });
+  return readyRefresh;
+}
+
+function withLiveIndexing(payload) {
+  return { ...payload, indexing: Boolean(indexJob?.running) };
+}
+
+app.get("/api/ready", async (_req, res) => {
+  try {
+    const now = Date.now();
+    const hasCache = Boolean(readyCache.payload);
+    const fresh = hasCache && now - readyCache.at < READY_CACHE_TTL_MS;
+    if (fresh) {
+      return res
+        .status(readyCache.status)
+        .json(withLiveIndexing(readyCache.payload));
+    }
+    if (hasCache) {
+      refreshReadyCache();
+      return res
+        .status(readyCache.status)
+        .json(withLiveIndexing(readyCache.payload));
+    }
+    const snapshot = await loadReadySnapshot();
+    readyCache = { at: Date.now(), ...snapshot };
+    return res
+      .status(snapshot.status)
+      .json(withLiveIndexing(snapshot.payload));
   } catch (err) {
     console.error(
       JSON.stringify({
@@ -621,27 +670,6 @@ app.post("/api/rag/index", async (_req, res) => {
   });
 });
 
-async function attachCafeCoordinates(results) {
-  if (!Array.isArray(results) || results.length === 0) return results;
-  try {
-    const coords = await listCafeCoordinates();
-    const byId = new Map(
-      coords.map((row) => [row.place_id, row])
-    );
-    return results.map((row) => {
-      const extra = byId.get(row.place_id);
-      if (!extra) return row;
-      return {
-        ...row,
-        latitude: extra.latitude,
-        longitude: extra.longitude,
-      };
-    });
-  } catch {
-    return results;
-  }
-}
-
 app.post(
   "/api/rag/search",
   searchDailyLimit,
@@ -684,7 +712,7 @@ app.post(
           googleApiKey,
         }
       );
-      const results = await attachCafeCoordinates(result.results ?? []);
+      const results = result.results ?? [];
       const payload = {
         answer: result.answer,
         intro: result.intro ?? null,
@@ -703,6 +731,9 @@ app.post(
           results: results.length,
           locationApplied: Boolean(payload.location?.applied),
           radiusKm: payload.location?.radius_km ?? null,
+          promptTokens: result.usage?.prompt_tokens ?? null,
+          completionTokens: result.usage?.completion_tokens ?? null,
+          totalTokens: result.usage?.total_tokens ?? null,
           durationMs: Date.now() - started,
         })
       );
@@ -720,6 +751,8 @@ app.post(
     }
   }
 );
+
+assertAdminAuthConfigured();
 
 const server = app.listen(PORT, "0.0.0.0", () => {
   console.log(

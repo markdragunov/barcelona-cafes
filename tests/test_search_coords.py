@@ -14,7 +14,7 @@ class HydrateCoordinatesTests(unittest.TestCase):
         with mock.patch(
             "rag.search.get_repository",
             return_value=mock.Mock(
-                list_cafe_coordinates=lambda: [
+                list_cafe_coordinates=lambda **_kwargs: [
                     {"place_id": "p1", "latitude": 41.385, "longitude": 2.173}
                 ]
             ),

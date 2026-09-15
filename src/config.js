@@ -154,6 +154,23 @@ export function isAdminAuthEnabled() {
   return isSupabaseAdminAuthEnabled() || isBasicAdminAuthEnabled();
 }
 
+/** Production droplet/compose, or any host that set DOMAIN. */
+export function isProductionRuntime() {
+  return env("NODE_ENV") === "production" || Boolean(env("DOMAIN"));
+}
+
+/**
+ * Fail closed: production must have an admin gate before the process binds.
+ * Local `npm start` without DOMAIN / NODE_ENV=production stays open.
+ */
+export function assertAdminAuthConfigured() {
+  if (isProductionRuntime() && !isAdminAuthEnabled()) {
+    throw new Error(
+      "Admin auth is required when NODE_ENV=production or DOMAIN is set. Configure ADMIN_EMAILS + Supabase Auth, or ADMIN_PASSWORD."
+    );
+  }
+}
+
 /** @deprecated Use getGoogleApiKey */
 export function getApiKey() {
   return getGoogleApiKey();

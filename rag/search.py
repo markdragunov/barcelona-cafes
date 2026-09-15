@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -14,7 +15,7 @@ from .index import indexes_ready
 from .location import resolve_location_filter
 from .paths import CHAT_MODEL, EMBEDDING_MODEL
 from .stores.factory import get_index_store, get_repository
-from .text import tokenize
+from .text import clip_document, tokenize
 
 REASONING_PROMPT = """You help recommend Barcelona coffee shops.
 Use ONLY the provided cafe data. No outside knowledge.
@@ -149,7 +150,7 @@ def _format_context(cafes: list[dict[str, Any]]) -> str:
                 f"cafe_district: {district if district else 'unknown'}",
                 f"cafe_website: {website if website else 'none'}",
                 "details:",
-                cafe.get("document") or "",
+                clip_document(cafe.get("document") or ""),
             ]
         )
         blocks.append(header)
@@ -224,6 +225,22 @@ def recommend_cafes(
             {"role": "user", "content": user_content},
         ],
     )
+    usage = getattr(resp, "usage", None)
+    if usage is not None:
+        print(
+            json.dumps(
+                {
+                    "msg": "openai_chat_usage",
+                    "model": CHAT_MODEL,
+                    "cafes": len(cafes),
+                    "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                    "completion_tokens": getattr(usage, "completion_tokens", None),
+                    "total_tokens": getattr(usage, "total_tokens", None),
+                }
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
     raw = (resp.choices[0].message.content or "").strip()
 
     reasons_by_id: dict[str, str] = {}
@@ -250,10 +267,18 @@ def recommend_cafes(
         )
         for cafe in cafes
     ]
+    usage_payload = None
+    if usage is not None:
+        usage_payload = {
+            "prompt_tokens": getattr(usage, "prompt_tokens", None),
+            "completion_tokens": getattr(usage, "completion_tokens", None),
+            "total_tokens": getattr(usage, "total_tokens", None),
+        }
     return {
         "intro": intro,
         "reasons_by_id": reasons_by_id,
         "answer": intro + "\n\n" + "\n\n".join(blocks),
+        "usage": usage_payload,
     }
 
 
@@ -265,13 +290,16 @@ def answer_with_llm(
 
 def _hydrate_coordinates(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Fill missing lat/lng from the cafe table so old indexes still map."""
-    if not results or all(
-        row.get("latitude") is not None and row.get("longitude") is not None
+    missing_ids = [
+        row.get("place_id")
         for row in results
-    ):
+        if row.get("place_id")
+        and (row.get("latitude") is None or row.get("longitude") is None)
+    ]
+    if not results or not missing_ids:
         return results
     try:
-        rows = get_repository().list_cafe_coordinates()
+        rows = get_repository().list_cafe_coordinates(place_ids=missing_ids)
     except Exception:
         return results
     by_id = {row["place_id"]: row for row in rows}
@@ -349,6 +377,7 @@ def hybrid_search_and_answer(
         ],
         "vector_count": len(vector_hits),
         "bm25_count": len(bm25_hits),
+        "usage": recommendation.get("usage"),
         "location": {
             "applied": bool(location_info.get("applied")),
             "requested": bool(location_info.get("requested")),

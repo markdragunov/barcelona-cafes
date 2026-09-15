@@ -46,6 +46,17 @@ class FactoryTests(unittest.TestCase):
             reset_storage_cache()
             repo = create_repository()
             self.assertEqual(repo.cafe_count(), 0)
+            conn = repo._connect()
+            try:
+                names = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='index'"
+                    )
+                }
+            finally:
+                conn.close()
+            self.assertIn("idx_cafes_coords", names)
             store = create_index_store()
             self.assertEqual(store.backend, "chroma")
             self.assertFalse(store.is_ready())
