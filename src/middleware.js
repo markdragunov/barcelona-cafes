@@ -272,7 +272,7 @@ export function securityHeaders(req, res, next) {
       "script-src 'self' https://unpkg.com https://cdn.jsdelivr.net",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com",
       "font-src 'self' https://fonts.gstatic.com",
-      "img-src 'self' data: https://*.basemaps.cartocdn.com https://*.cartocdn.com",
+      "img-src 'self' data: https://*.tile.openstreetmap.org",
       "connect-src 'self' https://*.supabase.co",
       "frame-ancestors 'none'",
       "base-uri 'self'",

@@ -199,6 +199,14 @@ describe("security headers", () => {
     assert.equal(httpRes.headers["x-content-type-options"], "nosniff");
     assert.match(httpRes.headers["content-security-policy"], /default-src 'self'/);
     assert.match(httpRes.headers["content-security-policy"], /script-src 'self'/);
+    assert.match(
+      httpRes.headers["content-security-policy"],
+      /img-src[^;]*tile\.openstreetmap\.org/
+    );
+    assert.equal(
+      /img-src[^;]*cartocdn/.test(httpRes.headers["content-security-policy"]),
+      false
+    );
     assert.equal(
       /script-src[^;]*unsafe-inline/.test(httpRes.headers["content-security-policy"]),
       false
