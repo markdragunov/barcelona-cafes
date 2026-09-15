@@ -7,11 +7,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
 
 const DEFAULT_TIMEOUT_MS = 600_000;
+const RECYCLE_AFTER_TIMEOUTS = 3;
+const STATUS_CACHE_TTL_MS = 15_000;
 
-let worker = null;
-let workerReady = null;
-let stdoutBuf = "";
-const pending = new Map();
+/** Commands that must not share the search worker pool (long, exclusive). */
+const ONE_SHOT_COMMANDS = new Set(["index"]);
 
 function ragEnv({ openaiApiKey, googleApiKey } = {}) {
   const env = { ...process.env, PYTHONUNBUFFERED: "1" };
@@ -81,15 +81,76 @@ export function parseRagArgs(args) {
   throw new Error(`Unknown RAG command: ${command || "(empty)"}`);
 }
 
-function rejectAll(err) {
-  for (const [, waiter] of pending) {
+export function shouldUseOneShot(command) {
+  return ONE_SHOT_COMMANDS.has(command);
+}
+
+export function workerPoolSize() {
+  const raw = Number(process.env.RAG_WORKER_POOL);
+  if (!Number.isFinite(raw)) return 2;
+  return Math.min(4, Math.max(1, Math.round(raw)));
+}
+
+export function shouldRecycleAfterTimeouts(consecutiveTimeouts) {
+  return consecutiveTimeouts >= RECYCLE_AFTER_TIMEOUTS;
+}
+
+/**
+ * Prefer a ready idle worker, then start a free slot, then the least loaded.
+ * @param {{index: number, proc: unknown, inflight: number, readyResolved?: boolean}[]} slots
+ */
+export function pickWorkerSlot(slots) {
+  if (!slots.length) return null;
+  const readyIdle = slots.filter(
+    (s) => s.proc && s.readyResolved && s.inflight === 0
+  );
+  if (readyIdle.length) return readyIdle[0];
+  const unstarted = slots.find((s) => !s.proc);
+  if (unstarted) return unstarted;
+  const starting = slots.find((s) => s.proc && !s.readyResolved);
+  if (starting) return starting;
+  const live = slots.filter((s) => s.proc);
+  if (!live.length) return slots[0];
+  return live.reduce((best, slot) =>
+    slot.inflight < best.inflight ? slot : best
+  );
+}
+
+function createSlot(index) {
+  return {
+    index,
+    proc: null,
+    ready: null,
+    pending: new Map(),
+    stdoutBuf: "",
+    inflight: 0,
+    consecutiveTimeouts: 0,
+    readyResolved: false,
+  };
+}
+
+let slots = [];
+
+function ensureSlotList() {
+  const size = workerPoolSize();
+  while (slots.length < size) slots.push(createSlot(slots.length));
+  while (slots.length > size) {
+    const extra = slots.pop();
+    recycleSlot(extra, new Error("RAG worker pool shrunk"));
+  }
+  return slots;
+}
+
+function rejectSlotPending(slot, err) {
+  for (const [, waiter] of slot.pending) {
     clearTimeout(waiter.timer);
     waiter.reject(err);
   }
-  pending.clear();
+  slot.pending.clear();
+  slot.inflight = 0;
 }
 
-function handleWorkerLine(line) {
+function handleSlotLine(slot, line) {
   const trimmed = line.trim();
   if (!trimmed) return;
   let data;
@@ -99,13 +160,20 @@ function handleWorkerLine(line) {
     return;
   }
   if (data?.event === "ready") {
-    workerReady?.resolve();
+    slot.readyResolved = true;
+    slot.ready?.resolve();
     return;
   }
   const id = data?.id;
-  if (!id || !pending.has(id)) return;
-  const waiter = pending.get(id);
-  pending.delete(id);
+  if (!id || !slot.pending.has(id)) {
+    slot.inflight = Math.max(0, slot.inflight - 1);
+    if (id) slot.consecutiveTimeouts = 0;
+    return;
+  }
+  const waiter = slot.pending.get(id);
+  slot.pending.delete(id);
+  slot.inflight = Math.max(0, slot.inflight - 1);
+  slot.consecutiveTimeouts = 0;
   clearTimeout(waiter.timer);
   if (!data.ok) {
     waiter.reject(new Error(data.error || "RAG command failed"));
@@ -114,107 +182,125 @@ function handleWorkerLine(line) {
   waiter.resolve(data);
 }
 
-function attachWorkerIO(proc) {
-  stdoutBuf = "";
+function attachSlotIO(slot, proc) {
+  slot.stdoutBuf = "";
   proc.stdout.on("data", (chunk) => {
-    stdoutBuf += chunk.toString();
+    slot.stdoutBuf += chunk.toString();
     let nl;
-    while ((nl = stdoutBuf.indexOf("\n")) >= 0) {
-      const line = stdoutBuf.slice(0, nl);
-      stdoutBuf = stdoutBuf.slice(nl + 1);
-      handleWorkerLine(line);
+    while ((nl = slot.stdoutBuf.indexOf("\n")) >= 0) {
+      const line = slot.stdoutBuf.slice(0, nl);
+      slot.stdoutBuf = slot.stdoutBuf.slice(nl + 1);
+      handleSlotLine(slot, line);
     }
   });
   proc.stderr.on("data", (chunk) => {
     const text = chunk.toString().trim();
     if (text) {
-      console.error(JSON.stringify({ msg: "rag_worker_stderr", text: text.slice(0, 500) }));
+      console.error(
+        JSON.stringify({
+          msg: "rag_worker_stderr",
+          worker: slot.index,
+          text: text.slice(0, 500),
+        })
+      );
     }
   });
   proc.on("error", (err) => {
-    const ready = workerReady;
-    worker = null;
-    workerReady = null;
+    const ready = slot.ready;
+    slot.proc = null;
+    slot.ready = null;
+    slot.readyResolved = false;
     ready?.reject(err);
-    rejectAll(err);
+    rejectSlotPending(slot, err);
   });
   proc.on("close", (code) => {
     const err = new Error(`RAG worker exited with code ${code}`);
-    const ready = workerReady;
-    worker = null;
-    workerReady = null;
-    stdoutBuf = "";
+    const ready = slot.ready;
+    slot.proc = null;
+    slot.ready = null;
+    slot.stdoutBuf = "";
+    slot.readyResolved = false;
     ready?.reject(err);
-    rejectAll(err);
+    rejectSlotPending(slot, err);
   });
 }
 
-function startWorker({ openaiApiKey, googleApiKey } = {}) {
-  if (worker) return workerReady.promise;
+function recycleSlot(slot, err) {
+  const proc = slot.proc;
+  slot.proc = null;
+  slot.ready = null;
+  slot.stdoutBuf = "";
+  slot.consecutiveTimeouts = 0;
+  slot.readyResolved = false;
+  rejectSlotPending(slot, err || new Error("RAG worker recycled"));
+  killProcess(proc);
+}
+
+function startSlot(slot, { openaiApiKey, googleApiKey } = {}) {
+  if (slot.proc && slot.ready?.promise) return slot.ready.promise;
   let resolveReady;
   let rejectReady;
-  workerReady = {
+  slot.ready = {
     promise: new Promise((resolve, reject) => {
       resolveReady = resolve;
       rejectReady = reject;
     }),
   };
-  workerReady.resolve = resolveReady;
-  workerReady.reject = rejectReady;
+  slot.ready.resolve = resolveReady;
+  slot.ready.reject = rejectReady;
 
   const proc = spawn(pythonBin(), ["-m", "rag", "worker"], {
     cwd: ROOT,
     env: ragEnv({ openaiApiKey, googleApiKey }),
   });
-  worker = proc;
-  attachWorkerIO(proc);
+  slot.proc = proc;
+  attachSlotIO(slot, proc);
   const readyTimeout = setTimeout(() => {
     rejectReady(new Error("RAG worker failed to start"));
-    stopWorkerProcess();
+    recycleSlot(slot, new Error("RAG worker failed to start"));
   }, 60_000);
-  workerReady.promise.finally(() => clearTimeout(readyTimeout)).catch(() => {});
-  return workerReady.promise;
+  slot.ready.promise.finally(() => clearTimeout(readyTimeout)).catch(() => {});
+  return slot.ready.promise;
 }
 
-function stopWorkerProcess() {
-  const proc = worker;
-  worker = null;
-  workerReady = null;
-  stdoutBuf = "";
-  killProcess(proc);
-}
-
-export function shutdownRagWorker() {
-  rejectAll(new Error("RAG worker shut down"));
-  stopWorkerProcess();
-}
-
-function sendToWorker(parsed, { timeoutMs, openaiApiKey, googleApiKey }) {
+function sendToSlot(slot, parsed, { timeoutMs, openaiApiKey }) {
   const id = randomUUID();
-  const payload = {
-    id,
-    ...parsed,
-  };
+  const payload = { id, ...parsed };
   if (openaiApiKey) payload.api_key = openaiApiKey;
 
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      pending.delete(id);
-      stopWorkerProcess();
+      if (!slot.pending.has(id)) return;
+      slot.pending.delete(id);
+      slot.consecutiveTimeouts += 1;
       reject(new Error(`RAG command timed out after ${timeoutMs}ms`));
+      if (shouldRecycleAfterTimeouts(slot.consecutiveTimeouts)) {
+        recycleSlot(
+          slot,
+          new Error("RAG worker recycled after consecutive timeouts")
+        );
+      }
     }, timeoutMs);
-    pending.set(id, { resolve, reject, timer });
-    const ok = worker.stdin.write(`${JSON.stringify(payload)}\n`);
-    if (!ok) {
-      worker.stdin.once("error", (err) => {
-        if (pending.has(id)) {
-          pending.delete(id);
-          clearTimeout(timer);
-          reject(err);
-        }
-      });
+    slot.pending.set(id, { resolve, reject, timer });
+    slot.inflight += 1;
+    try {
+      const ok = slot.proc.stdin.write(`${JSON.stringify(payload)}\n`);
+      if (!ok) {
+        slot.proc.stdin.once("error", (err) => {
+          if (slot.pending.has(id)) {
+            slot.pending.delete(id);
+            slot.inflight = Math.max(0, slot.inflight - 1);
+            clearTimeout(timer);
+            reject(err);
+          }
+        });
+      }
+    } catch (err) {
+      slot.pending.delete(id);
+      slot.inflight = Math.max(0, slot.inflight - 1);
+      clearTimeout(timer);
+      reject(err);
     }
-    void googleApiKey;
   });
 }
 
@@ -268,35 +354,84 @@ function usePersistentWorker() {
   return process.env.RAG_WORKER !== "0";
 }
 
+let statusCache = { at: 0, value: null };
+
+function cacheStatus(value) {
+  statusCache = { at: Date.now(), value };
+  return value;
+}
+
+export function getCachedIndexStatus() {
+  if (!statusCache.value) return null;
+  if (Date.now() - statusCache.at > STATUS_CACHE_TTL_MS) return statusCache.value;
+  return statusCache.value;
+}
+
+function statusCacheFresh() {
+  return Boolean(statusCache.value) && Date.now() - statusCache.at < STATUS_CACHE_TTL_MS;
+}
+
+async function runOnPool(parsed, opts) {
+  ensureSlotList();
+  const slot = pickWorkerSlot(slots);
+  if (!slot.proc) {
+    await startSlot(slot, opts);
+  } else if (slot.ready?.promise) {
+    await slot.ready.promise;
+  }
+  try {
+    return await sendToSlot(slot, parsed, opts);
+  } catch (err) {
+    if (String(err.message || err).includes("exited")) {
+      await startSlot(slot, opts);
+      return sendToSlot(slot, parsed, opts);
+    }
+    throw err;
+  }
+}
+
 /**
- * Run a RAG command through the warm Python worker (or one-shot spawn if RAG_WORKER=0).
+ * Run a RAG command. Index always uses a one-shot process so it cannot block
+ * public search. Search/status/ping go to a small persistent worker pool.
  */
 export function runRag(
   args,
   { timeoutMs = DEFAULT_TIMEOUT_MS, openaiApiKey, googleApiKey } = {}
 ) {
-  if (!usePersistentWorker()) {
+  const parsed = parseRagArgs(args);
+  if (!usePersistentWorker() || shouldUseOneShot(parsed.command)) {
     return runRagOnce(args, { timeoutMs, openaiApiKey, googleApiKey });
   }
 
-  const parsed = parseRagArgs(args);
-  return startWorker({ openaiApiKey, googleApiKey })
-    .catch((err) => {
-      stopWorkerProcess();
-      throw err;
-    })
-    .then(() => sendToWorker(parsed, { timeoutMs, openaiApiKey, googleApiKey }))
-    .catch((err) => {
-      if (String(err.message || err).includes("exited")) {
-        return startWorker({ openaiApiKey, googleApiKey }).then(() =>
-          sendToWorker(parsed, { timeoutMs, openaiApiKey, googleApiKey })
-        );
-      }
-      throw err;
-    });
+  if (parsed.command === "status" && statusCacheFresh()) {
+    return Promise.resolve(statusCache.value);
+  }
+
+  return runOnPool(parsed, { timeoutMs, openaiApiKey, googleApiKey }).then(
+    (data) => {
+      if (parsed.command === "status") cacheStatus(data);
+      return data;
+    }
+  );
 }
 
 export function warmupRagWorker(opts = {}) {
   if (!usePersistentWorker()) return Promise.resolve();
-  return runRag(["status"], { timeoutMs: opts.timeoutMs ?? 60_000 });
+  ensureSlotList();
+  const keys = opts;
+  return Promise.all(
+    slots.map((slot) =>
+      startSlot(slot, keys).then(() =>
+        sendToSlot(slot, { command: "ping" }, { timeoutMs: opts.timeoutMs ?? 60_000 })
+      )
+    )
+  ).then(() =>
+    runRag(["status"], { timeoutMs: opts.timeoutMs ?? 60_000 })
+  );
+}
+
+export function shutdownRagWorker() {
+  for (const slot of slots) {
+    recycleSlot(slot, new Error("RAG worker shut down"));
+  }
 }

@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { createSqliteRepository } from "../src/storage/sqliteRepository.js";
 import {
   createRepository,
@@ -105,6 +106,18 @@ describe("SqliteCafeRepository contract", () => {
 
   it("upsert → summary → export → coffee content → count", async () => {
     await runRepositoryContract(repo);
+  });
+
+  it("indexes cafe coordinates", () => {
+    const db = new DatabaseSync(process.env.SQLITE_PATH);
+    try {
+      const rows = db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index'")
+        .all();
+      assert.ok(rows.some((row) => row.name === "idx_cafes_coords"));
+    } finally {
+      db.close();
+    }
   });
 });
 

@@ -158,3 +158,74 @@ describe("asymmetric (JWKS) Supabase projects", () => {
     }
   });
 });
+
+describe("fail-closed admin in production", () => {
+  let saved;
+  let requireAdmin;
+  let assertAdminAuthConfigured;
+
+  before(async () => {
+    saved = {
+      NODE_ENV: process.env.NODE_ENV,
+      DOMAIN: process.env.DOMAIN,
+      SUPABASE_URL: process.env.SUPABASE_URL,
+      SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY,
+      SUPABASE_JWT_SECRET: process.env.SUPABASE_JWT_SECRET,
+      ADMIN_EMAILS: process.env.ADMIN_EMAILS,
+      ADMIN_PASSWORD: process.env.ADMIN_PASSWORD,
+    };
+    process.env.NODE_ENV = "production";
+    delete process.env.DOMAIN;
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_ANON_KEY;
+    delete process.env.SUPABASE_JWT_SECRET;
+    delete process.env.ADMIN_EMAILS;
+    delete process.env.ADMIN_PASSWORD;
+    ({ requireAdmin } = await import("../src/middleware.js"));
+    ({ assertAdminAuthConfigured } = await import("../src/config.js"));
+  });
+
+  after(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  function mockRes() {
+    const res = {
+      statusCode: 200,
+      body: null,
+      status(code) {
+        this.statusCode = code;
+        return this;
+      },
+      json(payload) {
+        this.body = payload;
+        return this;
+      },
+      set() {
+        return this;
+      },
+    };
+    return res;
+  }
+
+  it("does not start without an admin gate", () => {
+    assert.throws(
+      () => assertAdminAuthConfigured(),
+      /Admin auth is required/
+    );
+  });
+
+  it("requireAdmin does not fall open", async () => {
+    const req = { headers: {} };
+    const res = mockRes();
+    let nextCalled = false;
+    await requireAdmin(req, res, () => {
+      nextCalled = true;
+    });
+    assert.equal(res.statusCode, 503);
+    assert.equal(nextCalled, false);
+  });
+});

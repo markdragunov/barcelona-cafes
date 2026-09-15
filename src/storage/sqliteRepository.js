@@ -50,6 +50,7 @@ export function createSqliteRepository() {
     );
     CREATE INDEX IF NOT EXISTS idx_cafes_neighborhood ON cafes(neighborhood_id);
     CREATE INDEX IF NOT EXISTS idx_reviews_place ON reviews(place_id);
+    CREATE INDEX IF NOT EXISTS idx_cafes_coords ON cafes(latitude, longitude);
   `);
 
   const cafeColumns = db.prepare("PRAGMA table_info(cafes)").all();

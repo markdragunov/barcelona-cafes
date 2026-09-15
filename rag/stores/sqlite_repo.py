@@ -46,6 +46,9 @@ class SqliteCafeRepository:
               language_code TEXT,
               UNIQUE(place_id, author_name, publish_time, text)
             );
+            CREATE INDEX IF NOT EXISTS idx_cafes_neighborhood ON cafes(neighborhood_id);
+            CREATE INDEX IF NOT EXISTS idx_reviews_place ON reviews(place_id);
+            CREATE INDEX IF NOT EXISTS idx_cafes_coords ON cafes(latitude, longitude);
             """
         )
         conn.commit()
@@ -80,6 +83,7 @@ class SqliteCafeRepository:
         north: float | None = None,
         west: float | None = None,
         east: float | None = None,
+        place_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         conn = self._connect()
         conn.row_factory = sqlite3.Row
@@ -94,6 +98,11 @@ class SqliteCafeRepository:
                     " AND latitude BETWEEN ? AND ? AND longitude BETWEEN ? AND ?"
                 )
                 params = [south, north, west, east]
+            if place_ids is not None:
+                if not place_ids:
+                    return []
+                sql += f" AND place_id IN ({','.join('?' for _ in place_ids)})"
+                params.extend(place_ids)
             return [dict(r) for r in conn.execute(sql, params)]
         finally:
             conn.close()

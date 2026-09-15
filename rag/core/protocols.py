@@ -9,7 +9,14 @@ from typing import Any, Protocol, runtime_checkable
 class CafeRepository(Protocol):
     def load_cafe_documents(self) -> list[dict[str, Any]]: ...
 
-    def list_cafe_coordinates(self) -> list[dict[str, Any]]: ...
+    def list_cafe_coordinates(
+        self,
+        south: float | None = None,
+        north: float | None = None,
+        west: float | None = None,
+        east: float | None = None,
+        place_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]: ...
 
     def cafe_count(self) -> int: ...
 

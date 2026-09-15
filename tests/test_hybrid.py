@@ -41,5 +41,16 @@ class MergeHybridTests(unittest.TestCase):
         self.assertEqual(len(merged), 3)
 
 
+class FormatContextTests(unittest.TestCase):
+    def test_long_documents_are_clipped(self) -> None:
+        from rag.search import _format_context
+
+        ctx = _format_context(
+            [{"document": "review " * 800, "metadata": {"name": "Long Cafe"}}]
+        )
+        self.assertLess(len(ctx), 1600)
+        self.assertIn("…", ctx)
+
+
 if __name__ == "__main__":
     unittest.main()

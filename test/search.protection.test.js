@@ -198,6 +198,11 @@ describe("security headers", () => {
     securityHeaders(httpReq, httpRes, () => {});
     assert.equal(httpRes.headers["x-content-type-options"], "nosniff");
     assert.match(httpRes.headers["content-security-policy"], /default-src 'self'/);
+    assert.match(httpRes.headers["content-security-policy"], /script-src 'self'/);
+    assert.equal(
+      /script-src[^;]*unsafe-inline/.test(httpRes.headers["content-security-policy"]),
+      false
+    );
     assert.equal(httpRes.headers["strict-transport-security"], undefined);
 
     const httpsRes = mockRes();
