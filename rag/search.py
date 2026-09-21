@@ -10,6 +10,7 @@ from typing import Any
 
 from openai import OpenAI
 
+from .constraints import apply_min_rating, apply_reason_keep, parse_constraints
 from .bm25_cache import get_cache
 from .index import indexes_ready
 from .location import resolve_location_filter
@@ -29,9 +30,12 @@ Return valid JSON only (no markdown), shape:
 }
 
 Rules:
-- Include a reason for every cafe in the input, using that cafe's exact place_id.
+- Only include a reason for cafes that actually match the user's constraints.
+- Use that cafe's exact place_id.
+- If the user wants a place to work / laptop-friendly, omit cafes whose details do not support working (no laptop, wifi, workspace, or they are clearly a bakery, takeaway, or party spot).
+- If the user wants specialty coffee, omit cafes with no specialty / third-wave / filter evidence in the details.
 - why must be one concise sentence grounded in the cafe details.
-- If nothing matches, return {"intro":"...", "reasons":[]}."""
+- Returning fewer reasons than cafes — or {"intro":"...","reasons":[]} — is correct when nothing fits."""
 
 RRF_K = 60
 
@@ -208,13 +212,39 @@ def recommend_cafes(
             "I could not find relevant cafes in the local index for that question. "
             "Try re-indexing or broadening the query."
         )
-        return {"intro": intro, "reasons_by_id": {}, "answer": intro}
+        return {
+            "intro": intro,
+            "reasons_by_id": {},
+            "answer": intro,
+            "parsed_ok": True,
+        }
+
+    constraints = parse_constraints(query)
+    constraint_lines = []
+    if constraints["min_rating"] is not None:
+        constraint_lines.append(
+            f"- minimum rating {constraints['min_rating']:g} (already applied in retrieval)"
+        )
+    if constraints["needs_work"]:
+        constraint_lines.append(
+            "- place to work / laptop-friendly: omit cafes whose details do not support this"
+        )
+    if constraints["needs_specialty"]:
+        constraint_lines.append(
+            "- specialty coffee: omit cafes without specialty evidence in the details"
+        )
+    constraint_block = (
+        "Constraints:\n" + "\n".join(constraint_lines) + "\n\n"
+        if constraint_lines
+        else ""
+    )
 
     context = _format_context(cafes)
     user_content = (
         f"User question:\n{query}\n\n"
+        f"{constraint_block}"
         f"Cafe data (use only this):\n{context}\n\n"
-        "Return JSON with intro + one why sentence per place_id."
+        "Return JSON with intro + why sentences only for cafes that match."
     )
     resp = client.chat.completions.create(
         model=CHAT_MODEL,
@@ -245,8 +275,10 @@ def recommend_cafes(
 
     reasons_by_id: dict[str, str] = {}
     intro = "Here are matching coffee shops from the local data:"
+    parsed_ok = False
     try:
         parsed = _parse_reasons_json(raw)
+        parsed_ok = True
         if isinstance(parsed.get("intro"), str) and parsed["intro"].strip():
             intro = parsed["intro"].strip()
         for item in parsed.get("reasons") or []:
@@ -257,7 +289,26 @@ def recommend_cafes(
             if pid and why:
                 reasons_by_id[pid] = why
     except (json.JSONDecodeError, TypeError, ValueError):
-        pass
+        parsed_ok = False
+
+    kept = apply_reason_keep(cafes, reasons_by_id, parsed_ok)
+    if parsed_ok and not kept:
+        if not (isinstance(intro, str) and intro.strip()):
+            intro = "Nothing in the guide matches those constraints."
+        usage_payload = None
+        if usage is not None:
+            usage_payload = {
+                "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                "completion_tokens": getattr(usage, "completion_tokens", None),
+                "total_tokens": getattr(usage, "total_tokens", None),
+            }
+        return {
+            "intro": intro,
+            "reasons_by_id": {},
+            "answer": intro,
+            "usage": usage_payload,
+            "parsed_ok": True,
+        }
 
     blocks = [
         _format_cafe_block(
@@ -265,7 +316,7 @@ def recommend_cafes(
             reasons_by_id.get(cafe["place_id"], ""),
             cafe.get("place_id"),
         )
-        for cafe in cafes
+        for cafe in kept
     ]
     usage_payload = None
     if usage is not None:
@@ -276,9 +327,14 @@ def recommend_cafes(
         }
     return {
         "intro": intro,
-        "reasons_by_id": reasons_by_id,
-        "answer": intro + "\n\n" + "\n\n".join(blocks),
+        "reasons_by_id": {
+            cafe["place_id"]: reasons_by_id[cafe["place_id"]]
+            for cafe in kept
+            if cafe.get("place_id") in reasons_by_id
+        },
+        "answer": intro + "\n\n" + "\n\n".join(blocks) if blocks else intro,
         "usage": usage_payload,
+        "parsed_ok": parsed_ok,
     }
 
 
@@ -350,9 +406,14 @@ def hybrid_search_and_answer(
         vector_hits = fut_v.result()
         bm25_hits = fut_b.result()
 
-    merged = merge_hybrid(vector_hits, bm25_hits, top_n)
+    constraints = parse_constraints(query)
+    merged_wide = merge_hybrid(vector_hits, bm25_hits, retrieve_n)
+    merged = apply_min_rating(merged_wide, constraints["min_rating"], top_n)
     recommendation = recommend_cafes(client, query, merged)
     reasons_by_id = recommendation.get("reasons_by_id") or {}
+    shown = apply_reason_keep(
+        merged, reasons_by_id, bool(recommendation.get("parsed_ok"))
+    )
 
     payload: dict[str, Any] = {
         "answer": recommendation["answer"],
@@ -373,7 +434,7 @@ def hybrid_search_and_answer(
                 "vector_rank": c.get("vector_rank"),
                 "bm25_rank": c.get("bm25_rank"),
             }
-            for c in merged
+            for c in shown
         ],
         "vector_count": len(vector_hits),
         "bm25_count": len(bm25_hits),

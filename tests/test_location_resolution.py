@@ -55,7 +55,11 @@ class GazetteerLookupTests(unittest.TestCase):
         """shared/neighborhoods.json is the single source for both runtimes."""
         from rag.neighborhoods import GAZETTEER_PATH, load_neighborhoods
 
-        ids = {n["id"] for n in load_neighborhoods()}
+        ids = {
+            n["id"]
+            for n in load_neighborhoods()
+            if not n.get("searchGroup")
+        }
         self.assertEqual(
             ids,
             {"el-born", "eixample", "poblenou", "gracia", "gothic-quarter",
@@ -254,6 +258,59 @@ class DeterministicLocationExtractionTests(unittest.TestCase):
 
         self.assertIsNone(extract_location("best espresso in Barcelona"))
         self.assertIsNone(extract_location("specialty coffee"))
+
+    def test_center_maps_to_gotic_born_eixample_without_geocode(self) -> None:
+        from rag.location import extract_location
+
+        query = (
+            "cozy place to work in center areas of barcelona "
+            "with specialty coffe and >= 4 rating"
+        )
+        detected = extract_location(query)
+        self.assertIsNotNone(detected)
+        self.assertEqual(detected["location_type"], "area_group")
+        self.assertIn("Gothic Quarter", detected["location"])
+        self.assertIn("El Born", detected["location"])
+        self.assertIn("Eixample", detected["location"])
+        self.assertEqual(len(detected["viewports"]), 3)
+
+    def test_in_neighborhood_still_works_when_constraints_follow(self) -> None:
+        from rag.location import extract_location
+
+        detected = extract_location("quiet place to work in Gràcia with a laptop")
+        self.assertEqual(detected["location"], "Gràcia")
+        self.assertEqual(detected["location_type"], "neighborhood")
+
+
+class ViewportUnionTests(unittest.TestCase):
+    def test_cafes_in_viewports_keeps_only_points_inside_a_member_rect(self) -> None:
+        from rag import location as location_mod
+        from rag.neighborhoods import load_search_groups
+
+        group = next(g for g in load_search_groups() if g["id"] == "center")
+        gothic = next(
+            vp
+            for vp in group["viewports"]
+            if vp["low"]["latitude"] == 41.379
+        )
+        inside = {
+            "place_id": "in-gotic",
+            "latitude": (gothic["low"]["latitude"] + gothic["high"]["latitude"]) / 2,
+            "longitude": (gothic["low"]["longitude"] + gothic["high"]["longitude"]) / 2,
+        }
+        outside = {
+            "place_id": "gracia-cafe",
+            "latitude": 41.41,
+            "longitude": 2.155,
+        }
+
+        class Repo:
+            def list_cafe_coordinates(self, **_kwargs):
+                return [inside, outside]
+
+        with mock.patch.object(location_mod, "get_repository", return_value=Repo()):
+            ids = location_mod.cafes_in_viewports(group["viewports"])
+        self.assertEqual(ids, ["in-gotic"])
 
 
 if __name__ == "__main__":

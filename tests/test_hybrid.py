@@ -52,5 +52,74 @@ class FormatContextTests(unittest.TestCase):
         self.assertIn("…", ctx)
 
 
+class HybridPipelineTests(unittest.TestCase):
+    def test_drops_low_ratings_and_llm_omissions(self) -> None:
+        from unittest import mock
+
+        from rag import search as search_mod
+
+        low = {
+            "place_id": "low",
+            "document": "specialty",
+            "metadata": {"name": "Low", "rating": 3.7, "latitude": 41.38, "longitude": 2.17},
+            "rank": 1,
+            "score": 1.0,
+            "source": "vector",
+        }
+        bakery = {
+            "place_id": "bakery",
+            "document": "pastries",
+            "metadata": {"name": "Bakery", "rating": 4.6, "latitude": 41.38, "longitude": 2.17},
+            "rank": 2,
+            "score": 1.0,
+            "source": "vector",
+        }
+        work = {
+            "place_id": "work",
+            "document": "laptop wifi",
+            "metadata": {"name": "Work", "rating": 4.5, "latitude": 41.38, "longitude": 2.17},
+            "rank": 3,
+            "score": 1.0,
+            "source": "vector",
+        }
+
+        def fake_recommend(_client, _query, cafes):
+            ids = [c["place_id"] for c in cafes]
+            self.assertNotIn("low", ids)
+            self.assertIn("bakery", ids)
+            self.assertIn("work", ids)
+            return {
+                "intro": "A laptop-friendly specialty cafe.",
+                "reasons_by_id": {"work": "Has tables, wifi, and specialty coffee."},
+                "answer": "A laptop-friendly specialty cafe.",
+                "parsed_ok": True,
+            }
+
+        with mock.patch.object(search_mod, "indexes_ready", return_value=True), mock.patch.object(
+            search_mod, "resolve_location_filter",
+            return_value={"applied": False, "requested": True, "location": "Center"},
+        ), mock.patch.object(
+            search_mod, "_embed_query", return_value=[0.0]
+        ), mock.patch.object(
+            search_mod, "_vector_search", return_value=[low, bakery, work]
+        ), mock.patch.object(
+            search_mod, "_bm25_search", return_value=[]
+        ), mock.patch.object(
+            search_mod, "recommend_cafes", side_effect=fake_recommend
+        ), mock.patch.object(
+            search_mod, "_hydrate_coordinates", side_effect=lambda rows: rows
+        ):
+            payload = search_mod.hybrid_search_and_answer(
+                "sk-test",
+                "cozy place to work in center areas of barcelona "
+                "with specialty coffe and >= 4 rating",
+                top_n=5,
+            )
+
+        ids = [row["place_id"] for row in payload["results"]]
+        self.assertEqual(ids, ["work"])
+        self.assertEqual(payload["results"][0]["rating"], 4.5)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -15,8 +15,10 @@ const GAZETTEER_PATH = path.join(__dirname, "..", "shared", "neighborhoods.json"
 
 const { neighborhoods } = JSON.parse(readFileSync(GAZETTEER_PATH, "utf-8"));
 
+const COLLECTABLE = neighborhoods.filter((n) => !n.searchGroup);
+
 export const NEIGHBORHOODS = Object.fromEntries(
-  neighborhoods.map((n) => [n.id, n])
+  COLLECTABLE.map((n) => [n.id, n])
 );
 
 export const NEIGHBORHOOD_LIST = Object.values(NEIGHBORHOODS);
