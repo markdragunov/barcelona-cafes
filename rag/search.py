@@ -11,6 +11,7 @@ from typing import Any
 from openai import OpenAI
 
 from .constraints import apply_min_rating, apply_reason_keep, parse_constraints
+from .bm25_cache import get_cache
 from .index import indexes_ready
 from .location import resolve_location_filter
 from .paths import CHAT_MODEL, EMBEDDING_MODEL
