@@ -54,8 +54,8 @@ def load_neighborhoods() -> list[dict[str, Any]]:
 def _lookup_index() -> dict[str, dict[str, Any]]:
     index: dict[str, dict[str, Any]] = {}
     for entry in load_neighborhoods():
-        # City-wide entries are not a narrowing filter.
-        if entry.get("aggregate"):
+        # City-wide entries and search-only groups are not a single-neighborhood filter.
+        if entry.get("aggregate") or entry.get("searchGroup"):
             continue
         record = {
             "id": entry["id"],
@@ -130,7 +130,7 @@ def find_neighborhood_in_query(query: str) -> dict[str, Any] | None:
     """Scan a full user query for a known neighborhood name or alias."""
     entries = []
     for entry in load_neighborhoods():
-        if entry.get("aggregate"):
+        if entry.get("aggregate") or entry.get("searchGroup"):
             continue
         entries.append(
             {
@@ -142,6 +142,61 @@ def find_neighborhood_in_query(query: str) -> dict[str, Any] | None:
             }
         )
     return _scan_named_places(entries, query)
+
+
+def load_search_groups() -> list[dict[str, Any]]:
+    """Named unions of neighborhoods (e.g. Center = Gòtic + Born + Eixample)."""
+    by_id = {entry["id"]: entry for entry in load_neighborhoods()}
+    groups: list[dict[str, Any]] = []
+    for entry in load_neighborhoods():
+        member_ids = entry.get("searchGroup") or []
+        if not member_ids:
+            continue
+        viewports: list[dict[str, Any]] = []
+        member_names: list[str] = []
+        for member_id in member_ids:
+            member = by_id.get(member_id)
+            if not member or not member.get("viewport"):
+                continue
+            viewports.append(member["viewport"])
+            member_names.append(member["name"])
+        if not viewports:
+            continue
+        groups.append(
+            {
+                "id": entry["id"],
+                "name": entry["name"],
+                "aliases": entry.get("aliases", []),
+                "viewports": viewports,
+                "member_names": member_names,
+                "display": f"{entry['name']} ({', '.join(member_names)})",
+            }
+        )
+    return groups
+
+
+def find_search_group_in_query(query: str) -> dict[str, Any] | None:
+    entries = [
+        {
+            "id": group["id"],
+            "name": group["name"],
+            "aliases": group["aliases"],
+            "centroid": _centroid(group["viewports"][0]),
+            "kind": "area_group",
+            "viewports": group["viewports"],
+            "display": group["display"],
+            "member_names": group["member_names"],
+        }
+        for group in load_search_groups()
+        if group["viewports"]
+    ]
+    hit = _scan_named_places(entries, query)
+    if not hit:
+        return None
+    for group in load_search_groups():
+        if group["id"] == hit["id"]:
+            return group
+    return None
 
 
 @lru_cache(maxsize=1)

@@ -54,6 +54,26 @@
         "low": { "latitude": 41.32, "longitude": 2.07 },
         "high": { "latitude": 41.47, "longitude": 2.23 }
       }
+    },
+    {
+      "id": "center",
+      "name": "Center",
+      "aliases": [
+        "centre",
+        "downtown",
+        "city center",
+        "city centre",
+        "centro",
+        "el centro",
+        "center of barcelona",
+        "centre of barcelona",
+        "central barcelona",
+        "center areas",
+        "centre areas",
+        "the center",
+        "the centre"
+      ],
+      "searchGroup": ["gothic-quarter", "el-born", "eixample"]
     }
   ]
 }

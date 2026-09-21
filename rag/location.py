@@ -16,6 +16,7 @@ from .neighborhoods import (
     find_landmark_in_query,
     find_neighborhood,
     find_neighborhood_in_query,
+    find_search_group_in_query,
     normalize_name,
 )
 from .stores.factory import get_repository
@@ -35,6 +36,11 @@ _PLACE_STOPWORDS = {
     "barcelona",
 }
 
+# Cut the captured place before constraint clauses: "in Gràcia with a laptop".
+_PLACE_TAIL_STOP = re.compile(
+    r"(?i)\s+(?:with|without|and|or|for|para|con|для|that|which|where)\b"
+)
+
 # Deterministic place phrases: "in Gràcia", "cerca de la Barceloneta", "в Грасии".
 _PLACE_PATTERNS = [
     re.compile(
@@ -46,8 +52,25 @@ _PLACE_PATTERNS = [
 ]
 
 
+def _trim_place_candidate(raw: str) -> str:
+    text = re.sub(r"\s+", " ", raw or "").strip(" .,-")
+    cut = _PLACE_TAIL_STOP.search(text)
+    if cut:
+        text = text[: cut.start()].strip(" .,-")
+    text = re.sub(r"(?i)\s+of\s+barcelona$", "", text).strip()
+    return text
+
+
 def extract_location(query: str) -> dict[str, Any] | None:
     """Find a location in the query without calling an LLM."""
+    group = find_search_group_in_query(query)
+    if group:
+        return {
+            "location": group["display"],
+            "location_type": "area_group",
+            "viewports": group["viewports"],
+        }
+
     known = find_neighborhood_in_query(query)
     if known:
         return {"location": known["name"], "location_type": "neighborhood"}
@@ -60,7 +83,7 @@ def extract_location(query: str) -> dict[str, Any] | None:
         match = pattern.search(query or "")
         if not match:
             continue
-        candidate = re.sub(r"\s+", " ", match.group(1)).strip(" .,-")
+        candidate = _trim_place_candidate(match.group(1))
         if not candidate:
             continue
         first = normalize_name(candidate).split(" ")[0] if normalize_name(candidate) else ""
@@ -74,6 +97,13 @@ def extract_location(query: str) -> dict[str, Any] | None:
         nested_landmark = find_landmark(candidate)
         if nested_landmark:
             return {"location": nested_landmark["name"], "location_type": "landmark"}
+        nested_group = find_search_group_in_query(candidate)
+        if nested_group:
+            return {
+                "location": nested_group["display"],
+                "location_type": "area_group",
+                "viewports": nested_group["viewports"],
+            }
         return {"location": candidate, "location_type": "area"}
 
     return None
@@ -166,6 +196,42 @@ def cafes_within_radius(
     return matched
 
 
+def _in_viewport(lat: float, lon: float, viewport: dict[str, Any]) -> bool:
+    low = viewport["low"]
+    high = viewport["high"]
+    return (
+        float(low["latitude"]) <= lat <= float(high["latitude"])
+        and float(low["longitude"]) <= lon <= float(high["longitude"])
+    )
+
+
+def cafes_in_viewports(viewports: list[dict[str, Any]]) -> list[str]:
+    """Cafes whose coordinates fall in any of the neighborhood rectangles."""
+    if not viewports:
+        return []
+    south = min(float(vp["low"]["latitude"]) for vp in viewports)
+    north = max(float(vp["high"]["latitude"]) for vp in viewports)
+    west = min(float(vp["low"]["longitude"]) for vp in viewports)
+    east = max(float(vp["high"]["longitude"]) for vp in viewports)
+    repo = get_repository()
+    try:
+        rows = repo.list_cafe_coordinates(
+            south=south, north=north, west=west, east=east
+        )
+    except TypeError:
+        rows = repo.list_cafe_coordinates()
+    matched: list[str] = []
+    for row in rows:
+        try:
+            lat_f = float(row["latitude"])
+            lon_f = float(row["longitude"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if any(_in_viewport(lat_f, lon_f, vp) for vp in viewports):
+            matched.append(row["place_id"])
+    return matched
+
+
 def resolve_point(google_api_key: str, location: str) -> dict[str, Any]:
     """
     Resolve a location string to coordinates.
@@ -209,6 +275,36 @@ def resolve_location_filter(google_api_key: str, query: str) -> dict[str, Any]:
         }
 
     location = detected["location"]
+    if detected.get("location_type") == "area_group":
+        place_ids = cafes_in_viewports(detected.get("viewports") or [])
+        if not place_ids:
+            return {
+                "applied": False,
+                "requested": True,
+                "location": location,
+                "location_type": "area_group",
+                "coordinates": None,
+                "place_ids": None,
+                "cafe_count": 0,
+                "source": "gazetteer",
+                "notice": (
+                    f"Couldn't find cafes in '{location}', "
+                    "so these results cover all of Barcelona."
+                ),
+            }
+        return {
+            "applied": True,
+            "requested": True,
+            "location": location,
+            "location_type": "area_group",
+            "coordinates": None,
+            "radius_km": None,
+            "place_ids": place_ids,
+            "cafe_count": len(place_ids),
+            "source": "gazetteer",
+            "notice": None,
+        }
+
     try:
         point = resolve_point(google_api_key, location)
     except Exception as err:  # noqa: BLE001 - location filtering is optional
